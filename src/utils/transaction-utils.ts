@@ -30,21 +30,4 @@ export async function sendEthTransaction(
     console.error('❌ Error sending transaction:', error);
     throw error;
   }
-}
-
-/**
- * Checks if a transaction hash exists on JiffyScan and provides tracking information
- */
-export function getTransactionTrackingInfo(hash: Hex): string {
-  return `🔍 Track on JiffyScan: https://jiffyscan.xyz/userOpHash/${hash}?network=sepolia`;
-}
-
-/**
- * Format transaction result information
- */
-export function formatTransactionResult(hash: Hex): string {
-  return `
-✅ Transaction successfully sent!
-${getTransactionTrackingInfo(hash)}
-`;
 } 

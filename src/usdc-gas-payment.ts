@@ -1,12 +1,10 @@
-import { privateKeyToAccount } from "viem/accounts";
-import { createPublicClient, http, parseUnits, Address, Hex, encodeFunctionData, formatUnits, maxUint256, getAddress } from "viem";
+import { http, parseUnits, Address, Hex, encodeFunctionData, formatUnits, maxUint256, getAddress } from "viem";
 import { sepolia } from "viem/chains";
-import { createPimlicoClient } from "permissionless/clients/pimlico";
 import { createSmartAccountClient } from "permissionless";
-import { toSafeSmartAccount } from "permissionless/accounts";
 import { entryPoint06Address } from "viem/account-abstraction";
 import dotenv from "dotenv";
 import { fileURLToPath } from 'url';
+import { validateEnvironment, createOwnerAccount, createPublicClientForSepolia, createPimlicoClientInstance, createSafeSmartAccount } from "./utils/client-setup.js";
 
 // Load environment variables
 dotenv.config();
@@ -14,7 +12,7 @@ dotenv.config();
 // Constants
 const SEPOLIA_USDC_ADDRESS = getAddress("0x1c7d4B196Cb0C7B01D743FbC6116a902379c7238"); // USDC on Sepolia
 
-// Pimlico's ERC-20 Paymaster address - using the official one from the tutorial
+// Pimlico's ERC-20 Paymaster address
 // This is a special contract that accepts ERC-20 tokens for gas payment
 const SEPOLIA_ERC20_PAYMASTER = "0x00000000000000fB866DaAA79352cC568a005D96";
 
@@ -49,60 +47,23 @@ const ERC20_ABI = [
   },
 ] as const;
 
-/**
- * Send a transaction using USDC to pay for gas
- */
-async function sendTransactionWithUsdcGas() {
-  console.log("🚀 Starting USDC gas payment transaction...");
-  console.log("This transaction will use your USDC tokens to pay for gas fees!");
+async function sendTransactionWithHybridGasPayment() {
+  console.log("🚀 Starting hybrid gas payment transaction...");
+  console.log("Will try sponsored transaction first, then fall back to USDC if needed.");
 
   try {
-    // Get the private key
-    const privateKey = process.env.PRIVATE_KEY;
-    if (!privateKey) {
-      throw new Error("❌ Private key not found in environment variables");
-    }
-
-    // Get the API key
-    const apiKey = process.env.PIMLICO_API_KEY;
-    if (!apiKey) {
-      throw new Error("❌ Pimlico API key not found in environment variables");
-    }
-
-    // Create Pimlico transport URL
+    // Use shared utilities to validate environment and set up clients
+    const { apiKey, privateKey } = validateEnvironment();
+    const owner = createOwnerAccount(privateKey);
+    const publicClient = createPublicClientForSepolia();
+    const pimlicoClient = createPimlicoClientInstance(apiKey);
+    
+    // Create Pimlico transport URL (needed for client configuration)
     const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
 
-    // Create a client for the owner account
-    const owner = privateKeyToAccount(privateKey as Hex);
-    console.log(`👤 Owner address: ${owner.address}`);
-
-    // Create public client
-    const publicClient = createPublicClient({
-      transport: http("https://rpc.ankr.com/eth_sepolia"),
-      chain: sepolia,
-    });
-
-    // Create Pimlico client for sponsoring and fee estimation
-    console.log(`🔄 Creating Pimlico client...`);
-    const pimlicoClient = createPimlicoClient({
-      transport: http(pimlicoUrl),
-      entryPoint: {
-        address: entryPoint06Address,
-        version: "0.6",
-      },
-    });
-
-    // Create a Safe smart account
+    // Create a Safe smart account using shared utility
     console.log(`🔨 Loading Safe smart account...`);
-    const safeAccount = await toSafeSmartAccount({
-      client: publicClient,
-      owners: [owner],
-      entryPoint: {
-        address: entryPoint06Address,
-        version: "0.6",
-      },
-      version: "1.4.1",
-    });
+    const safeAccount = await createSafeSmartAccount(publicClient, owner);
 
     console.log(`💼 Smart account address: ${safeAccount.address}`);
 
@@ -112,6 +73,67 @@ async function sendTransactionWithUsdcGas() {
     });
     console.log(`💰 ETH balance: ${ethBalance} wei`);
 
+    // Define the recipient and amount for our transaction
+    const recipient = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"; // vitalik.eth
+    const amount = 0n; // We're sending 0 ETH, just a test transaction
+    
+    // STEP 1: Try with standard sponsorship first
+    console.log(`🎁 Attempting sponsored transaction (free gas)...`);
+    
+    try {
+      // Create a sponsored client without token context
+      const sponsoredClient = createSmartAccountClient({
+        account: safeAccount,
+        chain: sepolia,
+        bundlerTransport: http(pimlicoUrl),
+        paymaster: pimlicoClient,
+        userOperation: {
+          estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
+        }
+      });
+      
+      // Get gas prices for the transaction
+      const gasPrices = await pimlicoClient.getUserOperationGasPrice();
+      
+      // Send the transaction with standard sponsorship (no token context)
+      const hash = await sponsoredClient.sendTransaction({
+        to: recipient as Hex,
+        data: "0x68656c6c6f" as Hex, // "hello" in hex
+        value: amount,
+        maxFeePerGas: gasPrices.fast.maxFeePerGas,
+        maxPriorityFeePerGas: gasPrices.fast.maxPriorityFeePerGas,
+      });
+      
+      console.log(`✅ Sponsored transaction sent: ${hash}`);
+      
+      console.log(`⏳ Waiting for transaction to be confirmed...`);
+      const receipt = await publicClient.waitForTransactionReceipt({
+        hash,
+      });
+      
+      console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
+      return hash;
+    } catch (error) {
+      // Check if error is related to sponsorship rejection
+      const errorMessage = error.message ? error.message.toLowerCase() : '';
+      const sponsorshipFailed = 
+        errorMessage.includes("denied") || 
+        errorMessage.includes("policy") || 
+        errorMessage.includes("paymaster") ||
+        errorMessage.includes("sponsor");
+      
+      if (sponsorshipFailed) {
+        console.log(`⚠️ Sponsorship unavailable, falling back to USDC payment...`);
+        // Continue with USDC payment logic below
+      } else {
+        // For other errors, rethrow
+        console.error(`❌ Error in transaction:`, error);
+        throw error;
+      }
+    }
+    
+    // STEP 2: If we get here, sponsorship failed - proceed with USDC payment
+    
     // Check USDC balance
     const usdcBalance = await publicClient.readContract({
       address: SEPOLIA_USDC_ADDRESS,
@@ -119,11 +141,10 @@ async function sendTransactionWithUsdcGas() {
       functionName: "balanceOf",
       args: [safeAccount.address],
     });
-    console.log(`💵 USDC balance: ${usdcBalance} units`);
     
     // Convert to human-readable format (6 decimals for USDC)
     const humanReadableUsdcBalance = formatUnits(usdcBalance, 6);
-    console.log(`💵 USDC balance: ${humanReadableUsdcBalance} USDC`);
+    console.log(`💵 USDC balance: ${humanReadableUsdcBalance} USDC (${usdcBalance} units)`);
 
     // Minimum balance required for gas payment
     const minimumUsdcBalance = parseUnits("1", 6); // 1 USDC minimum
@@ -142,21 +163,12 @@ async function sendTransactionWithUsdcGas() {
     }
 
     const { paymaster, exchangeRate, postOpGas } = quotes[0];
+    console.log(`💱 Exchange rate: 1 ETH = ${exchangeRate} USDC tokens`);
     
     // Create a smart account client for standard sponsored transaction
-    console.log(`🔄 Setting up a standard sponsored client for approval...`);
-    const standardSmartAccountClient = createSmartAccountClient({
-      account: safeAccount,
-      chain: sepolia,
-      bundlerTransport: http(pimlicoUrl),
-      paymaster: pimlicoClient,
-      userOperation: {
-        estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
-      },
-    });
-
-    // Check current allowance
     console.log(`🔍 Checking current USDC allowance...`);
+    
+    // Check current allowance
     const currentAllowance = await publicClient.readContract({
       address: SEPOLIA_USDC_ADDRESS,
       abi: ERC20_ABI,
@@ -164,15 +176,22 @@ async function sendTransactionWithUsdcGas() {
       args: [safeAccount.address, paymaster],
     });
     
-    console.log(`Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
-    
-    // Define the recipient and amount for our main transaction
-    const recipient = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045";
-    const amount = 0n; // We're sending 0 ETH, just a test transaction
+    console.log(`💵 Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
     
     // If allowance is insufficient, send an approval transaction first
     if (currentAllowance < parseUnits("1", 6)) {
       console.log(`🔄 Approving USDC spending for the paymaster...`);
+      
+      // Create a standard client for approval transaction
+      const standardSmartAccountClient = createSmartAccountClient({
+        account: safeAccount,
+        chain: sepolia,
+        bundlerTransport: http(pimlicoUrl),
+        paymaster: pimlicoClient,
+        userOperation: {
+          estimateFeesPerGas: async () => (await pimlicoClient.getUserOperationGasPrice()).fast,
+        },
+      });
       
       try {
         // Get gas prices for the transaction
@@ -239,7 +258,7 @@ async function sendTransactionWithUsdcGas() {
         }
       });
       
-      console.log(`✅ Transaction sent: ${hash}`);
+      console.log(`✅ Transaction sent with USDC payment: ${hash}`);
       
       console.log(`⏳ Waiting for transaction to be confirmed...`);
       const receipt = await publicClient.waitForTransactionReceipt({
@@ -249,29 +268,30 @@ async function sendTransactionWithUsdcGas() {
       console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
       return hash;
     } catch (error) {
-      console.error(`❌ Transaction failed:`, error);
+      console.error(`❌ Transaction with USDC payment failed:`, error);
       throw error;
     }
   } catch (error) {
-    console.error(`❌ Error sending transaction with USDC gas payment:`, error);
+    console.error(`❌ Error in hybrid gas payment process:`, error);
     throw error;
   }
 }
+
+// Rename the exported function to reflect its new hybrid capability
+export { sendTransactionWithHybridGasPayment };
 
 // Check if this is the main file being executed (ESM version)
 const currentModule = fileURLToPath(import.meta.url);
 const isMain = process.argv[1] === currentModule;
 
 if (isMain) {
-  sendTransactionWithUsdcGas()
+  sendTransactionWithHybridGasPayment()
     .then(() => {
-      console.log("✅ USDC gas payment completed successfully");
+      console.log("✅ Hybrid gas payment process completed successfully");
       process.exit(0);
     })
     .catch((error) => {
-      console.error("❌ USDC gas payment failed:", error);
+      console.error("❌ Hybrid gas payment process failed:", error);
       process.exit(1);
     });
-}
-
-export { sendTransactionWithUsdcGas }; 
+} 

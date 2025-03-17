@@ -10,6 +10,7 @@
     "dev": "tsx src/index.ts",
     "send": "tsx src/send-transaction.ts",
     "usdc-gas": "tsx src/usdc-gas-payment.ts",
+    "hybrid-gas": "tsx src/usdc-gas-payment.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {

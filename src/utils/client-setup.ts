@@ -21,9 +21,6 @@ export type ClientSetup = {
   smartAccountClient: ReturnType<typeof createSmartAccountClient>;
 };
 
-/**
- * Validate required environment variables
- */
 export function validateEnvironment(): { apiKey: string; privateKey: Hex } {
   if (!process.env.PIMLICO_API_KEY) {
     throw new Error('PIMLICO_API_KEY is required');
@@ -39,18 +36,12 @@ export function validateEnvironment(): { apiKey: string; privateKey: Hex } {
   };
 }
 
-/**
- * Create owner account from private key
- */
 export function createOwnerAccount(privateKey: Hex) {
   const owner = privateKeyToAccount(privateKey);
   console.log('👤 Owner address:', owner.address);
   return owner;
 }
 
-/**
- * Create public client for Sepolia
- */
 export function createPublicClientForSepolia() {
   return createPublicClient({
     chain: sepolia,
@@ -58,9 +49,6 @@ export function createPublicClientForSepolia() {
   });
 }
 
-/**
- * Create Pimlico client
- */
 export function createPimlicoClientInstance(apiKey: string) {
   const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
   
@@ -73,9 +61,6 @@ export function createPimlicoClientInstance(apiKey: string) {
   });
 }
 
-/**
- * Create a Safe smart account
- */
 export async function createSafeSmartAccount(publicClient: ReturnType<typeof createPublicClient>, owner: ReturnType<typeof privateKeyToAccount>) {
   console.log('🔨 Loading Safe smart account...');
   
@@ -93,11 +78,6 @@ export async function createSafeSmartAccount(publicClient: ReturnType<typeof cre
   return account;
 }
 
-/**
- * Create a Simple smart account
- * Note: For now, we'll use the Safe account implementation as the Simple Account
- * API seems to have changed in permissionless.js
- */
 export async function createSimpleSmartAccount(publicClient: ReturnType<typeof createPublicClient>, owner: ReturnType<typeof privateKeyToAccount>) {
   console.log('🔨 Loading Smart account (using Safe implementation)...');
   console.log('⚠️ Note: Using Safe implementation as Simple Account API has changed in permissionless.js');
@@ -106,18 +86,12 @@ export async function createSimpleSmartAccount(publicClient: ReturnType<typeof c
   return createSafeSmartAccount(publicClient, owner);
 }
 
-/**
- * Check and log account balance
- */
 export async function checkAccountBalance(publicClient: ReturnType<typeof createPublicClient>, address: Address) {
   const balance = await publicClient.getBalance({ address });
   console.log('💰 Current balance:', balance.toString(), 'wei');
   return balance;
 }
 
-/**
- * Create a smart account client with paymaster
- */
 export function createSmartAccountClientWithPaymaster(
   account: any, // Using 'any' to handle different account types
   pimlicoClient: ReturnType<typeof createPimlicoClient>,
@@ -140,9 +114,7 @@ export function createSmartAccountClientWithPaymaster(
   });
 }
 
-/**
- * Initialize all clients and accounts for Safe implementation
- */
+// Initialize all clients and accounts for Safe implementation
 export async function initializeSafeClients(): Promise<ClientSetup> {
   const { apiKey, privateKey } = validateEnvironment();
   const owner = createOwnerAccount(privateKey);
@@ -168,9 +140,9 @@ export async function initializeSafeClients(): Promise<ClientSetup> {
   };
 }
 
-/**
- * Initialize all clients and accounts for Simple Account implementation
- * (Currently using Safe implementation under the hood)
+/*
+  Initialize all clients and accounts for Simple Account implementation
+  (Currently using Safe implementation under the hood)
  */
 export async function initializeSimpleAccountClients(): Promise<ClientSetup> {
   const { apiKey, privateKey } = validateEnvironment();
