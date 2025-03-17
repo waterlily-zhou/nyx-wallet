@@ -113,9 +113,11 @@ async function sendTransactionWithHybridGasPayment() {
       
       console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
       return hash;
-    } catch (error) {
+    } catch (error: unknown) {
       // Check if error is related to sponsorship rejection
-      const errorMessage = error.message ? error.message.toLowerCase() : '';
+      const errorMessage = error && typeof error === 'object' && 'message' in error && typeof error.message === 'string' 
+        ? error.message.toLowerCase() 
+        : '';
       const sponsorshipFailed = 
         errorMessage.includes("denied") || 
         errorMessage.includes("policy") || 

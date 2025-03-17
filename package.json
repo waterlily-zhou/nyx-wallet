@@ -11,6 +11,8 @@
     "send": "tsx src/send-transaction.ts",
     "usdc-gas": "tsx src/usdc-gas-payment.ts",
     "hybrid-gas": "tsx src/usdc-gas-payment.ts",
+    "cli": "tsx src/cli.ts",
+    "web": "tsx src/server.ts",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
   "repository": {
@@ -25,17 +27,31 @@
   },
   "homepage": "https://github.com/waterlily-zhou/aa-wallet#readme",
   "dependencies": {
+    "@koa/cors": "^5.0.0",
+    "@ladjs/koa-views": "^9.0.0",
     "@openzeppelin/contracts": "^5.2.0",
     "@safe-global/safe-core-sdk-types": "^5.1.0",
     "dotenv": "^16.4.7",
+    "ejs": "^3.1.10",
+    "inquirer": "^9.3.7",
+    "koa": "^2.16.0",
+    "koa-bodyparser": "^4.4.1",
+    "koa-router": "^13.0.1",
+    "node-fetch": "^2.6.9",
     "permissionless": "^0.2.36",
     "ts-node": "^10.9.2",
     "typescript": "^5.8.2",
-    "viem": "^2.23.11",
-    "node-fetch": "^2.6.9"
+    "viem": "^2.23.11"
   },
   "devDependencies": {
-    "tsx": "^4.7.0",
-    "@types/node-fetch": "^2.6.4"
+    "@types/express": "^5.0.0",
+    "@types/inquirer": "^9.0.7",
+    "@types/koa": "^2.15.0",
+    "@types/koa__cors": "^5.0.0",
+    "@types/koa-bodyparser": "^4.3.12",
+    "@types/koa-router": "^7.4.8",
+    "@types/koa-views": "^2.0.4",
+    "@types/node-fetch": "^2.6.4",
+    "tsx": "^4.7.0"
   }
 }
