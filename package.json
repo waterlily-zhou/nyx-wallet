@@ -1,0 +1,40 @@
+{
+  "name": "aa-wallet",
+  "version": "1.0.0",
+  "description": "Account Abstraction Wallet",
+  "main": "dist/index.js",
+  "type": "module",
+  "scripts": {
+    "build": "tsc",
+    "start": "npm run build && node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "send": "tsx src/send-transaction.ts",
+    "usdc-gas": "tsx src/usdc-gas-payment.ts",
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/waterlily-zhou/aa-wallet.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/waterlily-zhou/aa-wallet/issues"
+  },
+  "homepage": "https://github.com/waterlily-zhou/aa-wallet#readme",
+  "dependencies": {
+    "@openzeppelin/contracts": "^5.2.0",
+    "@safe-global/safe-core-sdk-types": "^5.1.0",
+    "dotenv": "^16.4.7",
+    "permissionless": "^0.2.36",
+    "ts-node": "^10.9.2",
+    "typescript": "^5.8.2",
+    "viem": "^2.23.11",
+    "node-fetch": "^2.6.9"
+  },
+  "devDependencies": {
+    "tsx": "^4.7.0",
+    "@types/node-fetch": "^2.6.4"
+  }
+}
