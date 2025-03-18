@@ -125,6 +125,35 @@
     <div class="alert alert-success mt-4">
       <i class="fas fa-check-circle me-2"></i> This is a standalone page working correctly with the blue background!
     </div>
+
+    <div class="mb-4">
+      <label class="form-label">Gas Payment Method</label>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="gasPayment" id="hybridGas" value="default" checked>
+        <label class="form-check-label" for="hybridGas">
+          <i class="fas fa-gift text-success me-1"></i> Try Sponsorship First (with USDC fallback)
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="gasPayment" id="sponsoredGas" value="sponsored">
+        <label class="form-check-label" for="sponsoredGas">
+          <i class="fas fa-gift text-success me-1"></i> Sponsored Only (free, may be rejected)
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="gasPayment" id="usdcGas" value="usdc">
+        <label class="form-check-label" for="usdcGas">
+          <i class="fas fa-money-bill me-1"></i> USDC Payment Only
+        </label>
+      </div>
+      <div class="form-check">
+        <input class="form-check-input" type="radio" name="gasPayment" id="bundlerGas" value="bundler">
+        <label class="form-check-label" for="bundlerGas">
+          <i class="fas fa-box me-1"></i> Use Bundler Service
+        </label>
+        <div class="form-text text-muted ms-4">This option uses a bundler service with Pimlico's SDK implementation</div>
+      </div>
+    </div>
   </div>
   
   <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>

@@ -137,7 +137,7 @@ document.addEventListener('DOMContentLoaded', function() {
       
       const recipient = document.getElementById('recipient').value.trim();
       const message = document.getElementById('message').value.trim();
-      const useHybridGas = document.getElementById('hybridGas').checked;
+      const selectedGasOption = document.querySelector('input[name="gasPayment"]:checked').value;
       
       if (!recipient || !recipient.startsWith('0x') || recipient.length !== 42) {
         showError('Please enter a valid Ethereum address.');
@@ -155,6 +155,18 @@ document.addEventListener('DOMContentLoaded', function() {
       transactionResult.style.display = 'none';
       transactionError.style.display = 'none';
       
+      // Update loading message based on selected gas option
+      const loadingMessage = document.getElementById('loadingMessage');
+      if (selectedGasOption === 'bundler') {
+        loadingMessage.textContent = 'Processing transaction via bundler service...';
+      } else if (selectedGasOption === 'hybrid') {
+        loadingMessage.textContent = 'Processing transaction (trying sponsorship first)...';
+      } else if (selectedGasOption === 'sponsored') {
+        loadingMessage.textContent = 'Processing sponsored transaction...';
+      } else if (selectedGasOption === 'usdc') {
+        loadingMessage.textContent = 'Processing transaction with USDC payment...';
+      }
+      
       // Scroll to the status area
       transactionStatus.scrollIntoView({ behavior: 'smooth' });
       
@@ -164,7 +176,11 @@ document.addEventListener('DOMContentLoaded', function() {
         headers: {
           'Content-Type': 'application/json',
         },
-        body: JSON.stringify({ recipient, message, useHybridGas }),
+        body: JSON.stringify({ 
+          recipient, 
+          message, 
+          gasPaymentMethod: selectedGasOption
+        }),
       })
         .then(response => response.json())
         .then(data => {

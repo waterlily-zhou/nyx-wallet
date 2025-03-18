@@ -8,7 +8,7 @@ import { dirname, join } from 'path';
 import fs from 'fs';
 import { Hex } from 'viem';
 import { validateEnvironment, createOwnerAccount, createPublicClientForSepolia, createPimlicoClientInstance, createSafeSmartAccount } from './utils/client-setup.js';
-import { sendTransactionWithHybridGasPayment } from './usdc-gas-payment.js';
+import { sendTransaction, GasPaymentMethod } from './usdc-gas-payment.js';
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -168,9 +168,9 @@ router.get('/standalone', async (ctx) => {
       savedAddresses
     });
     console.log('Standalone page rendered successfully');
-  } catch (error) {
+  } catch (error: unknown) {
     console.error('Standalone render error:', error);
-    ctx.body = `<h1>Error</h1><pre>${error.stack || error.message}</pre>`;
+    ctx.body = `<h1>Error</h1><pre>${error instanceof Error ? error.stack || error.message : 'Unknown error'}</pre>`;
   }
 });
 
@@ -327,7 +327,7 @@ router.delete('/api/addresses/:index', (ctx) => {
 // API to send a transaction
 router.post('/api/send-transaction', async (ctx) => {
   try {
-    const { recipient, message, useHybridGas } = ctx.request.body as any;
+    const { recipient, message, gasPaymentMethod = 'default' } = ctx.request.body as any;
     
     if (!recipient || !message) {
       ctx.status = 400;
@@ -346,10 +346,15 @@ router.post('/api/send-transaction', async (ctx) => {
     
     console.log(`Sending message to ${recipient}`);
     console.log(`Message: "${message}"`);
-    console.log(`Gas payment: ${useHybridGas ? 'Hybrid' : 'USDC only'}`);
+    console.log(`Gas payment method: ${gasPaymentMethod}`);
     
-    // Send the transaction using hybrid gas (currently only supported method)
-    const hash = await sendTransactionWithHybridGasPayment();
+    // Send the transaction using the specified gas payment method
+    const hash = await sendTransaction({
+      recipient,
+      data: messageHex,
+      value: 0n,
+      gasPaymentMethod: gasPaymentMethod as typeof GasPaymentMethod[keyof typeof GasPaymentMethod]
+    });
     
     ctx.body = {
       success: true,

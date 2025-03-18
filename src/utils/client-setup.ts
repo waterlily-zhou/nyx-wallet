@@ -43,9 +43,10 @@ export function createOwnerAccount(privateKey: Hex) {
 }
 
 export function createPublicClientForSepolia() {
+  // Use a public Sepolia RPC endpoint without API key requirements
   return createPublicClient({
     chain: sepolia,
-    transport: http("https://rpc.ankr.com/eth_sepolia"),
+    transport: http("https://ethereum-sepolia.publicnode.com"),
   });
 }
 

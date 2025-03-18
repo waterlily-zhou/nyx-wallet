@@ -27,9 +27,11 @@
   },
   "homepage": "https://github.com/waterlily-zhou/aa-wallet#readme",
   "dependencies": {
+    "@account-abstraction/utils": "^0.6.0",
     "@koa/cors": "^5.0.0",
     "@ladjs/koa-views": "^9.0.0",
     "@openzeppelin/contracts": "^5.2.0",
+    "@pimlico/alto": "^0.0.13",
     "@safe-global/safe-core-sdk-types": "^5.1.0",
     "dotenv": "^16.4.7",
     "ejs": "^3.1.10",
