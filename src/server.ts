@@ -87,6 +87,10 @@ async function initializeWallet() {
 const app = new Koa();
 const router = new Router();
 
+// Set application name
+const APP_NAME = 'Nyx Wallet';
+console.log(`Initializing ${APP_NAME}...`);
+
 // Middleware
 app.use(bodyParser());
 app.use(cors());
@@ -133,9 +137,9 @@ router.get('/', async (ctx) => {
   try {
     const wallet = await initializeWallet();
     
-    // Try with the test layout first
     await ctx.render('index', {
       layout: 'test-layout',
+      title: `${APP_NAME} - Bringing Light to Crypto`,
       wallet: {
         address: wallet.safeAccount.address,
         ownerAddress: wallet.owner.address,
@@ -147,6 +151,7 @@ router.get('/', async (ctx) => {
     console.error('Render error:', error);
     await ctx.render('error', { 
       layout: 'test-layout',
+      title: `${APP_NAME} - Error`,
       error 
     });
   }
@@ -155,11 +160,12 @@ router.get('/', async (ctx) => {
 // Add a new route for the standalone page
 router.get('/standalone', async (ctx) => {
   try {
-    console.log('Rendering standalone page');
+    console.log(`Rendering ${APP_NAME} standalone page`);
     const wallet = await initializeWallet();
     
     // Render standalone page without layout
     await ctx.render('standalone', {
+      title: `${APP_NAME} - Standalone`,
       wallet: {
         address: wallet.safeAccount.address,
         ownerAddress: wallet.owner.address,
@@ -170,7 +176,7 @@ router.get('/standalone', async (ctx) => {
     console.log('Standalone page rendered successfully');
   } catch (error: unknown) {
     console.error('Standalone render error:', error);
-    ctx.body = `<h1>Error</h1><pre>${error instanceof Error ? error.stack || error.message : 'Unknown error'}</pre>`;
+    ctx.body = `<h1>${APP_NAME} - Error</h1><pre>${error instanceof Error ? error.stack || error.message : 'Unknown error'}</pre>`;
   }
 });
 
@@ -327,7 +333,14 @@ router.delete('/api/addresses/:index', (ctx) => {
 // API to send a transaction
 router.post('/api/send-transaction', async (ctx) => {
   try {
-    const { recipient, message, gasPaymentMethod = 'default' } = ctx.request.body as any;
+    const { 
+      recipient, 
+      message, 
+      amount = '0', 
+      currency = 'ETH',
+      gasPaymentMethod = 'default', 
+      submissionMethod = 'direct' 
+    } = ctx.request.body as any;
     
     if (!recipient || !message) {
       ctx.status = 400;
@@ -344,17 +357,63 @@ router.post('/api/send-transaction', async (ctx) => {
     // Convert message to hex
     const messageHex = '0x' + Buffer.from(message).toString('hex') as Hex;
     
+    // Parse amount to send
+    let valueToSend = 0n;
+    
+    if (amount && parseFloat(amount) > 0) {
+      if (currency === 'ETH') {
+        // Convert ETH amount to wei (1 ETH = 10^18 wei)
+        valueToSend = BigInt(Math.floor(parseFloat(amount) * 1e18));
+      }
+      // Note: If currency is USDC, we'll handle it differently in the transaction
+      // This is just for logging, the actual USDC transfer would be handled in the contract interaction
+    }
+    
     console.log(`Sending message to ${recipient}`);
     console.log(`Message: "${message}"`);
+    console.log(`Amount: ${amount} ${currency}`);
+    console.log(`Value in wei: ${valueToSend.toString()}`);
     console.log(`Gas payment method: ${gasPaymentMethod}`);
+    console.log(`Submission method: ${submissionMethod}`);
     
-    // Send the transaction using the specified gas payment method
-    const hash = await sendTransaction({
-      recipient,
-      data: messageHex,
-      value: 0n,
-      gasPaymentMethod: gasPaymentMethod as typeof GasPaymentMethod[keyof typeof GasPaymentMethod]
-    });
+    // Send the transaction using the specified methods
+    let hash;
+    
+    if (submissionMethod === 'bundler') {
+      // Use bundler service from bundler-service.js
+      const { sendUserOperation, waitForUserOperationReceipt } = await import('./utils/bundler-service.js');
+      const { apiKey, privateKey } = validateEnvironment();
+      
+      let txData: `0x${string}` = messageHex as `0x${string}`;
+      
+      // If sending USDC, we would need to create proper contract call data here
+      // (Not implementing full USDC transfer logic, just illustrating)
+      if (currency === 'USDC' && parseFloat(amount) > 0) {
+        console.log('USDC transfer functionality would be implemented here');
+        // Would need to prepare ERC20 transfer call data
+      }
+      
+      hash = await sendUserOperation({
+        privateKey,
+        apiKey,
+        to: recipient as `0x${string}`,
+        data: txData,
+        value: currency === 'ETH' ? valueToSend : 0n
+      });
+      
+      // Wait for receipt
+      await waitForUserOperationReceipt(hash, privateKey, apiKey);
+    } else {
+      // Use standard transaction methods based on gas payment preference
+      hash = await sendTransaction({
+        recipient,
+        data: messageHex,
+        value: currency === 'ETH' ? valueToSend : 0n,
+        gasPaymentMethod: gasPaymentMethod as typeof GasPaymentMethod[keyof typeof GasPaymentMethod]
+        // Note: If currency is USDC, the actual token transfer would need to be 
+        // implemented through contract interactions in the sendTransaction function
+      });
+    }
     
     ctx.body = {
       success: true,
@@ -377,7 +436,7 @@ app.use(router.routes()).use(router.allowedMethods());
 // Start the server
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => {
-  console.log(`🚀 Server running at http://localhost:${PORT}/`);
+  console.log(`${APP_NAME} server running at http://localhost:${PORT}/`);
 });
 
 export default app; 

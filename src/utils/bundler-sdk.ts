@@ -1,10 +1,3 @@
-/**
- * Unified Bundler Service
- * 
- * This file serves as a single entry point for all bundler operations,
- * using the permissionless.js SDK implementation internally.
- */
-
 import { Hex } from 'viem';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
@@ -14,58 +7,17 @@ import { toSafeSmartAccount } from 'permissionless/accounts';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { entryPoint06Address } from 'viem/account-abstraction';
 
-// Define common types used in the service
-export type UserOperation = {
-  sender: string;
-  nonce: string | bigint;
-  initCode: string;
-  callData: string;
-  callGasLimit: string | bigint;
-  verificationGasLimit: string | bigint;
-  preVerificationGas: string | bigint;
-  maxFeePerGas: string | bigint;
-  maxPriorityFeePerGas: string | bigint;
-  paymasterAndData: string;
-  signature: string;
-}
-
-// Create a client cache to avoid reinitializing on each transaction
-type ClientCache = {
-  publicClient: any;
-  pimlicoClient: any;
-  owner: any;
-  safeAccount: any;
-  smartAccountClient: any;
-  chainId: number;
-  privateKey: Hex;
-  apiKey: string;
-};
-
-// Global cache to store initialized clients
-const clientCache: Record<string, ClientCache> = {};
-
 /**
- * Initialize a Pimlico bundler client with permissionless.js SDK
+ * Initialize a Pimlico bundler client using their SDK approach
  * @param privateKey The private key to use for the smart account
  * @param apiKey The Pimlico API key
  * @param chainId The chain ID (defaults to Sepolia testnet)
  */
-export async function initializeBundler(
+export async function initializePimlicoBundler(
   privateKey: Hex,
   apiKey: string,
   chainId: number = 11155111 // Sepolia by default
 ) {
-  // Create a cache key based on privateKey, apiKey, and chainId
-  const cacheKey = `${privateKey}_${apiKey}_${chainId}`;
-  
-  // Check if we already have initialized clients for this key
-  if (clientCache[cacheKey]) {
-    console.log('🔄 Using cached clients from previous initialization');
-    return clientCache[cacheKey];
-  }
-  
-  console.log('🔨 Initializing new clients...');
-  
   // Determine the network part of the URL based on chainId
   let network = 'sepolia';
   if (chainId === 84532) {
@@ -123,59 +75,43 @@ export async function initializeBundler(
     },
   });
   
-  // Cache the initialized clients
-  const clients = {
+  return {
     publicClient,
     pimlicoClient,
     owner,
     safeAccount,
-    smartAccountClient,
-    chainId,
-    privateKey,
-    apiKey
+    smartAccountClient
   };
-  
-  clientCache[cacheKey] = clients;
-  console.log('✅ Clients initialized and cached successfully');
-  
-  return clients;
 }
 
 /**
- * Send a user operation via the bundler
+ * Send a user operation via the bundler using Pimlico's SDK
  * @param options The options for the transaction
  * @returns The transaction hash
  */
-export async function sendUserOperation({
+export async function sendUserOperationWithSDK({
   privateKey,
   apiKey,
-  userOp,
   to,
   data,
-  value = 0n,
-  entryPoint = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Hex
+  value = 0n
 }: {
   privateKey: Hex,
   apiKey: string,
-  userOp?: UserOperation,
-  to?: Hex,
+  to: Hex,
   data?: Hex,
-  value?: bigint,
-  entryPoint?: Hex
+  value?: bigint
 }): Promise<Hex> {
   try {
     // Initialize all the clients using Pimlico's SDK
-    const { smartAccountClient } = await initializeBundler(privateKey, apiKey);
+    const { smartAccountClient } = await initializePimlicoBundler(privateKey, apiKey);
     
-    console.log(`📦 Sending transaction via bundler...`);
-    
-    // If a specific userOp is provided, we could handle it here,
-    // but for now we'll use the smartAccountClient which handles this internally
+    console.log(`📦 Sending transaction via bundler to ${to}...`);
     
     // Send the transaction using the smartAccountClient
     // This internally creates a user operation, sponsors it with the paymaster, signs it, and sends it to the bundler
     const hash = await smartAccountClient.sendTransaction({
-      to: to || '0x0000000000000000000000000000000000000000' as Hex,
+      to,
       data: data || '0x',
       value,
     });
@@ -183,24 +119,24 @@ export async function sendUserOperation({
     console.log(`✅ Transaction sent via bundler. Hash: ${hash}`);
     return hash;
   } catch (error) {
-    console.error('Error sending user operation:', error);
+    console.error('Error sending user operation with SDK:', error);
     throw error;
   }
 }
 
 /**
- * Wait for a transaction receipt
+ * Wait for a transaction receipt using the SDK's client
  * @param transactionHash The transaction hash to wait for
  * @param privateKey The private key of the owner
  * @param apiKey The Pimlico API key
  */
-export async function waitForUserOperationReceipt(
+export async function waitForTransactionReceipt(
   transactionHash: Hex,
   privateKey: Hex, 
   apiKey: string
 ): Promise<any> {
   try {
-    const { publicClient } = await initializeBundler(privateKey, apiKey);
+    const { publicClient } = await initializePimlicoBundler(privateKey, apiKey);
     
     console.log(`⏳ Waiting for transaction to be confirmed: ${transactionHash}`);
     
@@ -210,12 +146,7 @@ export async function waitForUserOperationReceipt(
     });
     
     console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
-    // Return a consistent format matching our previous implementation
-    return {
-      transactionHash: receipt.transactionHash,
-      blockNumber: receipt.blockNumber,
-      status: receipt.status
-    };
+    return receipt;
   } catch (error) {
     console.error('Error waiting for transaction receipt:', error);
     throw error;

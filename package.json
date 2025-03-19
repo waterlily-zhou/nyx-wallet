@@ -1,7 +1,7 @@
 {
-  "name": "aa-wallet",
+  "name": "nyx-wallet",
   "version": "1.0.0",
-  "description": "Account Abstraction Wallet",
+  "description": "Nyx Wallet - Bringing Light to Crypto Transactions",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -17,15 +17,15 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/waterlily-zhou/aa-wallet.git"
+    "url": "git+https://github.com/waterlily-zhou/nyx-wallet.git"
   },
   "keywords": [],
   "author": "",
   "license": "ISC",
   "bugs": {
-    "url": "https://github.com/waterlily-zhou/aa-wallet/issues"
+    "url": "https://github.com/waterlily-zhou/nyx-wallet/issues"
   },
-  "homepage": "https://github.com/waterlily-zhou/aa-wallet#readme",
+  "homepage": "https://github.com/waterlily-zhou/nyx-wallet#readme",
   "dependencies": {
     "@account-abstraction/utils": "^0.6.0",
     "@koa/cors": "^5.0.0",

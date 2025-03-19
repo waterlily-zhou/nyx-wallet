@@ -77,7 +77,7 @@ export async function sendTransaction(options: TransactionOptions): Promise<stri
     gasPaymentMethod = GasPaymentMethod.DEFAULT 
   } = options;
   
-  console.log(`🚀 Starting transaction with gas payment method: ${gasPaymentMethod}`);
+  console.log(`Starting transaction with gas payment method: ${gasPaymentMethod}`);
   
   // Use bundler if specified
   if (gasPaymentMethod === GasPaymentMethod.BUNDLER) {
@@ -125,7 +125,7 @@ async function sendTransactionWithBundler({
     console.log(`✅ Bundled transaction sent: ${transactionHash}`);
     
     // Wait for transaction to be mined
-    console.log(`⏳ Waiting for bundled transaction to be confirmed...`);
+    console.log(`Waiting for bundled transaction to be confirmed...`);
     const receipt = await waitForUserOperationReceipt(
       transactionHash,
       privateKey,
@@ -152,7 +152,7 @@ async function sendTransactionWithSponsoredGas({
   data?: string; 
   value?: bigint; 
 }): Promise<string> {
-  console.log("🚀 Starting sponsored transaction...");
+  console.log("Starting sponsored transaction...");
   
   try {
     // Use shared utilities to validate environment and set up clients
@@ -165,9 +165,8 @@ async function sendTransactionWithSponsoredGas({
     const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
 
     // Create a Safe smart account
-    console.log(`🔨 Loading Safe smart account...`);
     const safeAccount = await createSafeSmartAccount(publicClient, owner);
-    console.log(`💼 Smart account address: ${safeAccount.address}`);
+    console.log(`Smart account address: ${safeAccount.address}`);
     
     // Create a sponsored client
     const sponsoredClient = createSmartAccountClient({
@@ -195,7 +194,7 @@ async function sendTransactionWithSponsoredGas({
     console.log(`✅ Sponsored transaction sent: ${hash}`);
     
     // Wait for confirmation
-    console.log(`⏳ Waiting for transaction to be confirmed...`);
+    console.log(`Waiting for transaction to be confirmed...`);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
     
@@ -218,7 +217,7 @@ async function sendTransactionWithUsdcGas({
   data?: string; 
   value?: bigint; 
 }): Promise<string> {
-  console.log("🚀 Starting USDC-paid transaction...");
+  console.log("Starting USDC-paid transaction...");
   
   try {
     // Set up clients
@@ -229,7 +228,7 @@ async function sendTransactionWithUsdcGas({
     const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
     const safeAccount = await createSafeSmartAccount(publicClient, owner);
     
-    console.log(`💼 Smart account address: ${safeAccount.address}`);
+    console.log(`Smart account address: ${safeAccount.address}`);
     
     // Check USDC balance
     const usdcBalance = await publicClient.readContract({
@@ -240,7 +239,7 @@ async function sendTransactionWithUsdcGas({
     });
     
     const humanReadableUsdcBalance = formatUnits(usdcBalance, 6);
-    console.log(`💵 USDC balance: ${humanReadableUsdcBalance} USDC (${usdcBalance} units)`);
+    console.log(`USDC balance: ${humanReadableUsdcBalance} USDC (${usdcBalance} units)`);
 
     // Minimum balance check
     const minimumUsdcBalance = parseUnits("1", 6); // 1 USDC minimum
@@ -269,7 +268,7 @@ async function sendTransactionWithUsdcGas({
       args: [safeAccount.address, paymaster],
     });
     
-    console.log(`💵 Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
+    console.log(`Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
     
     // Approve if needed
     if (currentAllowance < parseUnits("1", 6)) {
@@ -290,7 +289,7 @@ async function sendTransactionWithUsdcGas({
     });
     
     // Send transaction
-    console.log(`🔄 Sending transaction using USDC for gas...`);
+    console.log(`Sending transaction using USDC for gas...`);
     const gasPrices = await pimlicoClient.getUserOperationGasPrice();
     
     const hash = await erc20SmartAccountClient.sendTransaction({
@@ -307,7 +306,7 @@ async function sendTransactionWithUsdcGas({
     console.log(`✅ Transaction sent with USDC payment: ${hash}`);
     
     // Wait for confirmation
-    console.log(`⏳ Waiting for transaction to be confirmed...`);
+    console.log(`Waiting for transaction to be confirmed...`);
     const receipt = await publicClient.waitForTransactionReceipt({ hash });
     console.log(`✅ Transaction confirmed in block ${receipt.blockNumber}`);
     
@@ -328,7 +327,7 @@ async function approveUsdcForPaymaster(
   pimlicoClient: any, 
   publicClient: any
 ) {
-  console.log(`🔄 Approving USDC spending for the paymaster...`);
+  console.log(`Approving USDC spending for the paymaster...`);
   
   // Create a standard client for approval
   const standardSmartAccountClient = createSmartAccountClient({
@@ -360,7 +359,7 @@ async function approveUsdcForPaymaster(
   console.log(`✅ Approval transaction sent: ${approvalHash}`);
   
   // Wait for approval
-  console.log(`⏳ Waiting for approval transaction to be confirmed...`);
+  console.log(`Waiting for approval transaction to be confirmed...`);
   await publicClient.waitForTransactionReceipt({
     hash: approvalHash,
   });
@@ -382,23 +381,23 @@ async function sendTransactionWithHybridGasPayment() {
     const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
 
     // Create a Safe smart account using shared utility
-    console.log(`🔨 Loading Safe smart account...`);
+    console.log(`Loading Safe smart account...`);
     const safeAccount = await createSafeSmartAccount(publicClient, owner);
 
-    console.log(`💼 Smart account address: ${safeAccount.address}`);
+    console.log(`Smart account address: ${safeAccount.address}`);
 
     // Check ETH balance
     const ethBalance = await publicClient.getBalance({
       address: safeAccount.address,
     });
-    console.log(`💰 ETH balance: ${ethBalance} wei`);
+    console.log(`ETH balance: ${ethBalance} wei`);
 
     // Define the recipient and amount for our transaction
     const recipient = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045"; // vitalik.eth
     const amount = 0n; // We're sending 0 ETH, just a test transaction
     
     // STEP 1: Try with standard sponsorship first
-    console.log(`🎁 Attempting sponsored transaction (free gas)...`);
+    console.log(`Attempting sponsored transaction (free gas)...`);
     
     try {
       // Create a sponsored client without token context
@@ -445,7 +444,7 @@ async function sendTransactionWithHybridGasPayment() {
         errorMessage.includes("sponsor");
       
       if (sponsorshipFailed) {
-        console.log(`⚠️ Sponsorship unavailable, falling back to USDC payment...`);
+        console.log(`Sponsorship unavailable, falling back to USDC payment...`);
         // Continue with USDC payment logic below
       } else {
         // For other errors, rethrow
@@ -466,7 +465,7 @@ async function sendTransactionWithHybridGasPayment() {
     
     // Convert to human-readable format (6 decimals for USDC)
     const humanReadableUsdcBalance = formatUnits(usdcBalance, 6);
-    console.log(`💵 USDC balance: ${humanReadableUsdcBalance} USDC (${usdcBalance} units)`);
+    console.log(`USDC balance: ${humanReadableUsdcBalance} USDC (${usdcBalance} units)`);
 
     // Minimum balance required for gas payment
     const minimumUsdcBalance = parseUnits("1", 6); // 1 USDC minimum
@@ -485,10 +484,10 @@ async function sendTransactionWithHybridGasPayment() {
     }
 
     const { paymaster, exchangeRate, postOpGas } = quotes[0];
-    console.log(`💱 Exchange rate: 1 ETH = ${exchangeRate} USDC tokens`);
+    console.log(`Exchange rate: 1 ETH = ${exchangeRate} USDC tokens`);
     
     // Create a smart account client for standard sponsored transaction
-    console.log(`🔍 Checking current USDC allowance...`);
+    console.log(`Checking current USDC allowance...`);
     
     // Check current allowance
     const currentAllowance = await publicClient.readContract({
@@ -498,11 +497,11 @@ async function sendTransactionWithHybridGasPayment() {
       args: [safeAccount.address, paymaster],
     });
     
-    console.log(`💵 Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
+    console.log(`Current allowance: ${formatUnits(currentAllowance, 6)} USDC units`);
     
     // If allowance is insufficient, send an approval transaction first
     if (currentAllowance < parseUnits("1", 6)) {
-      console.log(`🔄 Approving USDC spending for the paymaster...`);
+      console.log(`Approving USDC spending for the paymaster...`);
       
       // Create a standard client for approval transaction
       const standardSmartAccountClient = createSmartAccountClient({
@@ -535,7 +534,7 @@ async function sendTransactionWithHybridGasPayment() {
         console.log(`✅ Approval transaction sent: ${approvalHash}`);
         
         // Wait for approval to be confirmed
-        console.log(`⏳ Waiting for approval transaction to be confirmed...`);
+        console.log(`Waiting for approval transaction to be confirmed...`);
         await publicClient.waitForTransactionReceipt({
           hash: approvalHash,
         });
@@ -549,7 +548,7 @@ async function sendTransactionWithHybridGasPayment() {
     }
     
     // Create a smart account client with USDC paymaster context
-    console.log(`🔄 Setting up smart account client with USDC paymaster...`);
+    console.log(`Setting up smart account client with USDC paymaster...`);
     
     // Create a smart account client with the same account but with USDC paymaster context
     const erc20SmartAccountClient = createSmartAccountClient({
@@ -563,7 +562,7 @@ async function sendTransactionWithHybridGasPayment() {
     });
     
     // Send the actual transaction with USDC as gas
-    console.log(`🔄 Sending transaction using USDC for gas...`);
+    console.log(`Sending transaction using USDC for gas...`);
     try {
       // Get gas prices for the transaction
       const gasPrices = await pimlicoClient.getUserOperationGasPrice();
@@ -582,7 +581,7 @@ async function sendTransactionWithHybridGasPayment() {
       
       console.log(`✅ Transaction sent with USDC payment: ${hash}`);
       
-      console.log(`⏳ Waiting for transaction to be confirmed...`);
+      console.log(`Waiting for transaction to be confirmed...`);
       const receipt = await publicClient.waitForTransactionReceipt({
         hash,
       });

@@ -48,6 +48,7 @@ npm run dev
 ```
 
 This will:
+
 1. Create a Safe smart account controlled by your private key
 2. Display the wallet address
 3. Show the current balance
@@ -64,7 +65,6 @@ To send a transaction from your Smart Account:
 ```bash
 npm run send
 ```
-
 
 ## How It Works
 

@@ -13,20 +13,50 @@ document.addEventListener('DOMContentLoaded', function() {
   const transactionHash = document.getElementById('transactionHash');
   const viewOnEtherscan = document.getElementById('viewOnEtherscan');
   
-  // Bootstrap modal instances
-  const addAddressModal = new bootstrap.Modal(document.getElementById('addAddressModal'));
-  const errorModal = new bootstrap.Modal(document.getElementById('errorModal'));
+  // Bootstrap modal instances - only initialize if elements exist
+  let addAddressModal, errorModal;
+  
+  const addAddressModalElement = document.getElementById('addAddressModal');
+  if (addAddressModalElement) {
+    try {
+      addAddressModal = new bootstrap.Modal(addAddressModalElement);
+    } catch (error) {
+      console.error('Error initializing addAddressModal:', error);
+    }
+  }
+  
+  const errorModalElement = document.getElementById('errorModal');
+  if (errorModalElement) {
+    try {
+      errorModal = new bootstrap.Modal(errorModalElement);
+    } catch (error) {
+      console.error('Error initializing errorModal:', error);
+    }
+  }
   
   // Function to show an error in the modal
   function showError(message) {
-    document.getElementById('errorModalText').textContent = message;
-    errorModal.show();
+    console.log('Error:', message);
+    const errorModalText = document.getElementById('errorModalText');
+    if (errorModalText) {
+      errorModalText.textContent = message;
+    }
+    
+    if (errorModal) {
+      errorModal.show();
+    } else {
+      // Fallback if modal isn't available
+      alert(message);
+    }
   }
   
   // Open the add address modal
-  if (addAddressBtn) {
+  if (addAddressBtn && addAddressModal) {
     addAddressBtn.addEventListener('click', function() {
-      document.getElementById('addAddressForm').reset();
+      const addAddressForm = document.getElementById('addAddressForm');
+      if (addAddressForm) {
+        addAddressForm.reset();
+      }
       addAddressModal.show();
     });
   }
@@ -36,6 +66,11 @@ document.addEventListener('DOMContentLoaded', function() {
     saveAddressBtn.addEventListener('click', function() {
       const nameInput = document.getElementById('addressName');
       const addressInput = document.getElementById('addressValue');
+      
+      if (!nameInput || !addressInput) {
+        showError('Form elements not found.');
+        return;
+      }
       
       const name = nameInput.value.trim();
       const address = addressInput.value.trim();
@@ -112,12 +147,20 @@ document.addEventListener('DOMContentLoaded', function() {
           event.target.closest('.select-address-btn')) {
         
         const card = event.target.closest('.address-card');
+        if (!card) return;
+        
         const address = card.dataset.address;
         
         if (address) {
-          document.getElementById('recipient').value = address;
-          // Scroll to the send transaction form
-          document.querySelector('.card-header i.fa-paper-plane').scrollIntoView({ behavior: 'smooth' });
+          const recipientInput = document.getElementById('recipient');
+          if (recipientInput) {
+            recipientInput.value = address;
+            // Scroll to the send transaction form
+            const formHeader = document.querySelector('.card-header i.fa-paper-plane');
+            if (formHeader) {
+              formHeader.scrollIntoView({ behavior: 'smooth' });
+            }
+          }
         }
       }
     });
@@ -132,43 +175,141 @@ document.addEventListener('DOMContentLoaded', function() {
   
   // Send a transaction
   if (sendTransactionForm) {
+    console.log('Found sendTransactionForm, adding event listener');
+    
+    // Get the smart account address for the preview
+    const smartAccountElement = document.querySelector('.wallet-address');
+    const smartAccountAddress = smartAccountElement ? smartAccountElement.textContent.trim() : '';
+    
+    // Elements for transaction preview
+    const reviewTransactionBtn = document.getElementById('reviewTransactionBtn');
+    const editTransactionBtn = document.getElementById('editTransactionBtn');
+    const confirmTransactionBtn = document.getElementById('confirmTransactionBtn');
+    const transactionPreview = document.getElementById('transactionPreview');
+    
+    // Preview elements
+    const previewFrom = document.getElementById('previewFrom');
+    const previewTo = document.getElementById('previewTo');
+    const previewAmount = document.getElementById('previewAmount');
+    const previewMessage = document.getElementById('previewMessage');
+    
+    // Show transaction preview
+    if (reviewTransactionBtn) {
+      reviewTransactionBtn.addEventListener('click', function() {
+        const recipientInput = document.getElementById('recipient');
+        const messageInput = document.getElementById('message');
+        const amountInput = document.getElementById('amount');
+        const currencySelect = document.getElementById('currency');
+        
+        if (!recipientInput || !messageInput || !amountInput || !currencySelect) {
+          showError('Form elements not found.');
+          return;
+        }
+        
+        const recipient = recipientInput.value.trim();
+        const message = messageInput.value.trim();
+        const amount = amountInput.value.trim() || '0';
+        const currency = currencySelect.value;
+        
+        // Validate inputs
+        if (!recipient || !recipient.startsWith('0x') || recipient.length !== 42) {
+          showError('Please enter a valid Ethereum address.');
+          return;
+        }
+        
+        if (!message) {
+          showError('Please enter a message to send.');
+          return;
+        }
+        
+        // Update preview elements
+        if (previewFrom) previewFrom.textContent = smartAccountAddress;
+        if (previewTo) previewTo.textContent = recipient;
+        if (previewAmount) previewAmount.textContent = `${amount} ${currency}`;
+        if (previewMessage) previewMessage.textContent = message;
+        
+        // Show preview
+        if (transactionPreview) transactionPreview.style.display = 'block';
+        
+        // Scroll to preview
+        transactionPreview.scrollIntoView({ behavior: 'smooth' });
+      });
+    }
+    
+    // Return to edit mode
+    if (editTransactionBtn) {
+      editTransactionBtn.addEventListener('click', function() {
+        if (transactionPreview) transactionPreview.style.display = 'none';
+      });
+    }
+    
+    // Form submission handler
     sendTransactionForm.addEventListener('submit', function(event) {
+      console.log('Form submit event triggered!');
       event.preventDefault();
       
-      const recipient = document.getElementById('recipient').value.trim();
-      const message = document.getElementById('message').value.trim();
-      const selectedGasOption = document.querySelector('input[name="gasPayment"]:checked').value;
+      const recipientInput = document.getElementById('recipient');
+      const messageInput = document.getElementById('message');
+      const amountInput = document.getElementById('amount');
+      const currencySelect = document.getElementById('currency');
+      const selectedGasOptionEl = document.querySelector('input[name="gasPayment"]:checked');
+      const selectedSubmissionMethodEl = document.querySelector('input[name="submissionMethod"]:checked');
       
-      if (!recipient || !recipient.startsWith('0x') || recipient.length !== 42) {
-        showError('Please enter a valid Ethereum address.');
+      if (!recipientInput || !messageInput || !amountInput || !currencySelect || 
+          !selectedGasOptionEl || !selectedSubmissionMethodEl) {
+        showError('Form elements not found.');
         return;
       }
       
-      if (!message) {
-        showError('Please enter a message to send.');
-        return;
-      }
+      const recipient = recipientInput.value.trim();
+      const message = messageInput.value.trim();
+      const amount = amountInput.value.trim() || '0';
+      const currency = currencySelect.value;
+      const gasPaymentMethod = selectedGasOptionEl.value;
+      const submissionMethod = selectedSubmissionMethodEl.value;
+      
+      console.log('Form data:', { 
+        recipient, 
+        message,
+        amount,
+        currency,
+        gasPaymentMethod,
+        submissionMethod 
+      });
+      
+      // Hide preview and show status
+      if (transactionPreview) transactionPreview.style.display = 'none';
       
       // Show the transaction status area
-      transactionStatus.style.display = 'block';
-      transactionLoading.style.display = 'block';
-      transactionResult.style.display = 'none';
-      transactionError.style.display = 'none';
+      if (transactionStatus) transactionStatus.style.display = 'block';
+      if (transactionLoading) transactionLoading.style.display = 'block';
+      if (transactionResult) transactionResult.style.display = 'none';
+      if (transactionError) transactionError.style.display = 'none';
       
-      // Update loading message based on selected gas option
+      // Update loading message based on selected options
       const loadingMessage = document.getElementById('loadingMessage');
-      if (selectedGasOption === 'bundler') {
-        loadingMessage.textContent = 'Processing transaction via bundler service...';
-      } else if (selectedGasOption === 'hybrid') {
-        loadingMessage.textContent = 'Processing transaction (trying sponsorship first)...';
-      } else if (selectedGasOption === 'sponsored') {
-        loadingMessage.textContent = 'Processing sponsored transaction...';
-      } else if (selectedGasOption === 'usdc') {
-        loadingMessage.textContent = 'Processing transaction with USDC payment...';
+      if (loadingMessage) {
+        let methodText = '';
+        
+        if (submissionMethod === 'bundler') {
+          methodText = 'via bundler service';
+        } else {
+          methodText = 'via direct submission';
+        }
+        
+        if (gasPaymentMethod === 'default') {
+          loadingMessage.textContent = `Processing transaction ${methodText} (trying sponsorship first)...`;
+        } else if (gasPaymentMethod === 'sponsored') {
+          loadingMessage.textContent = `Processing sponsored transaction ${methodText}...`;
+        } else if (gasPaymentMethod === 'usdc') {
+          loadingMessage.textContent = `Processing transaction with USDC payment ${methodText}...`;
+        }
       }
       
       // Scroll to the status area
-      transactionStatus.scrollIntoView({ behavior: 'smooth' });
+      if (transactionStatus) {
+        transactionStatus.scrollIntoView({ behavior: 'smooth' });
+      }
       
       // API call to send the transaction
       fetch('/api/send-transaction', {
@@ -178,32 +319,43 @@ document.addEventListener('DOMContentLoaded', function() {
         },
         body: JSON.stringify({ 
           recipient, 
-          message, 
-          gasPaymentMethod: selectedGasOption
+          message,
+          amount,
+          currency, 
+          gasPaymentMethod,
+          submissionMethod
         }),
       })
-        .then(response => response.json())
+        .then(response => {
+          if (!response.ok) {
+            throw new Error(`HTTP error! Status: ${response.status}`);
+          }
+          return response.json();
+        })
         .then(data => {
-          transactionLoading.style.display = 'none';
+          if (transactionLoading) transactionLoading.style.display = 'none';
           
           if (data.success) {
             // Show success message
-            transactionResult.style.display = 'block';
-            transactionHash.textContent = data.transactionHash;
-            viewOnEtherscan.href = data.explorerUrl;
+            if (transactionResult) transactionResult.style.display = 'block';
+            if (transactionHash) transactionHash.value = data.transactionHash;
+            if (viewOnEtherscan) viewOnEtherscan.href = data.explorerUrl;
           } else {
             // Show error message
-            transactionError.style.display = 'block';
-            errorMessage.textContent = data.error || 'Transaction failed.';
+            if (transactionError) transactionError.style.display = 'block';
+            if (errorMessage) errorMessage.textContent = data.error || 'Transaction failed.';
           }
         })
         .catch(error => {
-          // Show error message
-          transactionLoading.style.display = 'none';
-          transactionError.style.display = 'block';
-          errorMessage.textContent = 'An error occurred while sending the transaction.';
           console.error('Error sending transaction:', error);
+          
+          // Show error message
+          if (transactionLoading) transactionLoading.style.display = 'none';
+          if (transactionError) transactionError.style.display = 'block';
+          if (errorMessage) errorMessage.textContent = 'An error occurred while sending the transaction: ' + error.message;
         });
     });
+  } else {
+    console.error('sendTransactionForm not found in the DOM');
   }
 }); 
