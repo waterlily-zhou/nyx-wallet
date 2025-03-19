@@ -1,8 +1,8 @@
-# Nyx Wallet - Bringing Light to Crypto Transactions
+# Nyx Wallet
 
 ![Nyx Wallet](https://img.shields.io/badge/Nyx%20Wallet-Crypto%20Account%20Abstract-6246ea)
 
-Nyx Wallet is an Account Abstraction wallet based on ERC-4337 that simplifies crypto transactions. Named after Nyx, the Greek goddess of night who gives birth to light, this wallet aims to illuminate the complex world of blockchain transactions.
+Nyx Wallet is an Account Abstraction wallet based on ERC-4337 that simplifies crypto transactions. 
 
 ## Why "Nyx"?
 
@@ -34,9 +34,6 @@ The project has been successfully set up with:
 
 - **Transaction Submission Options**: Use direct RPC calls or bundler service for optimal transaction handling
 
-- **Clean Dark-themed UI**: Reduces eye strain while providing clear visual hierarchy
-
-- **Amount Support**: Send ETH or USDC with your transactions
 
 ## Setup
 
@@ -103,13 +100,3 @@ To send a transaction from your Smart Account:
 ```bash
 npm run send
 ```
-
-## How It Works
-
-1. **Account Creation**: We use Pimlico and Safe to create a smart contract wallet that follows ERC-4337
-
-2. **Transaction Handling**: Transactions are bundled as "UserOperations" and sent to Pimlico's bundler
-
-3. **Gas Payment**: Can be paid normally, with USDC, or sponsored via Pimlico's paymaster
-
-4. **Signature**: Your private key signs transactions, but never interacts directly with the blockchain
