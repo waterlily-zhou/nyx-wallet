@@ -1,12 +1,12 @@
 # Nyx Wallet - Bringing Light to Crypto Transactions
 
-![Nyx Wallet](https://img.shields.io/badge/Nyx%20Wallet-Bringing%20Light%20to%20Crypto-6246ea)
+![Nyx Wallet](https://img.shields.io/badge/Nyx%20Wallet-Crypto%20Account%20Abstract-6246ea)
 
 Nyx Wallet is an Account Abstraction wallet based on ERC-4337 that simplifies crypto transactions. Named after Nyx, the Greek goddess of night who gives birth to light, this wallet aims to illuminate the complex world of blockchain transactions.
 
 ## Why "Nyx"?
 
-Just as Nyx (night) gives birth to light, our wallet brings clarity to the often obscure world of cryptocurrency transactions. We transform complex, encoded blockchain data into intuitive, easy-to-understand information for users.
+The Nyx wallet offers seamless and securewallet experience, transforming complex, encoded blockchain data into intuitive, easy-to-understand information for users.
 
 ## Current Status
 
