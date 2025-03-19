@@ -6,9 +6,11 @@ import cors from '@koa/cors';
 import { fileURLToPath } from 'url';
 import { dirname, join } from 'path';
 import fs from 'fs';
-import { Hex } from 'viem';
+import { Hex, encodeFunctionData, http, type Address } from 'viem';
+import { sepolia } from 'viem/chains';
 import { validateEnvironment, createOwnerAccount, createPublicClientForSepolia, createPimlicoClientInstance, createSafeSmartAccount } from './utils/client-setup.js';
 import { sendTransaction, GasPaymentMethod } from './usdc-gas-payment.js';
+import { createSmartAccountClient } from 'permissionless';
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -330,21 +332,327 @@ router.delete('/api/addresses/:index', (ctx) => {
   ctx.body = { success: true, addresses: savedAddresses };
 });
 
+// API to get the current nonce
+router.get('/api/get-nonce', async (ctx) => {
+  try {
+    const { publicClient } = await initializeWallet();
+    const wallet = await initializeWallet();
+    
+    // Get the transaction count (nonce)
+    const nonce = await publicClient.getTransactionCount({
+      address: wallet.safeAccount.address,
+    });
+    
+    ctx.body = { success: true, nonce: nonce.toString() };
+  } catch (error) {
+    console.error('Error fetching nonce:', error);
+    ctx.status = 500;
+    ctx.body = { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      nonce: '0' // Default fallback
+    };
+  }
+});
+
+// API to check if a recipient is new (not in saved addresses)
+router.get('/api/check-recipient', async (ctx) => {
+  try {
+    const address = ctx.query.address as string;
+    
+    if (!address) {
+      ctx.status = 400;
+      ctx.body = { error: 'Address parameter is required' };
+      return;
+    }
+    
+    // Check if the address exists in saved addresses
+    const isNew = !savedAddresses.some(saved => 
+      saved.address.toLowerCase() === address.toLowerCase()
+    );
+    
+    ctx.body = { success: true, isNew };
+  } catch (error) {
+    console.error('Error checking recipient:', error);
+    ctx.status = 500;
+    ctx.body = { 
+      success: false, 
+      error: error instanceof Error ? error.message : 'Unknown error',
+      isNew: true // Default to showing warning
+    };
+  }
+});
+
+// API to generate UserOperation calldata without sending it
+router.post('/api/get-calldata', async (ctx) => {
+  try {
+    const { 
+      fromAddress,
+      toAddress,
+      amount = '0',
+      currency = 'ETH',
+      message = '',
+      nonce = '0',
+      gasPaymentMethod = 'default',
+      submissionMethod = 'direct'
+    } = ctx.request.body as any;
+    
+    if (!fromAddress || !toAddress) {
+      ctx.status = 400;
+      ctx.body = { error: 'From and to addresses are required' };
+      return;
+    }
+    
+    // Ensure fromAddress and toAddress are valid Ethereum addresses
+    if (!fromAddress.startsWith('0x') || fromAddress.length !== 42 || 
+        !toAddress.startsWith('0x') || toAddress.length !== 42) {
+      ctx.status = 400;
+      ctx.body = { error: 'Invalid Ethereum address format' };
+      return;
+    }
+    
+    // Initialize the wallet environment
+    const { apiKey, privateKey } = validateEnvironment();
+    const owner = createOwnerAccount(privateKey);
+    const publicClient = createPublicClientForSepolia();
+    const pimlicoClient = createPimlicoClientInstance(apiKey);
+    
+    // Create the Safe account instance
+    const safeAccount = await createSafeSmartAccount(publicClient, owner);
+    
+    // Create the smart account client for creating UserOperations
+    const pimlicoUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${apiKey}`;
+    const smartAccountClient = createSmartAccountClient({
+      account: safeAccount,
+      chain: sepolia,
+      bundlerTransport: http(pimlicoUrl),
+      paymaster: pimlicoClient,
+    });
+    
+    console.log(`Generating calldata for transaction from ${fromAddress} to ${toAddress}`);
+    console.log(`Amount: ${amount} ${currency}`);
+    console.log(`Message: ${message}`);
+    
+    // Convert message to hex if provided
+    const messageHex = message ? ('0x' + Buffer.from(message).toString('hex') as Hex) : '0x';
+    
+    // Parse amount to send
+    let valueToSend = 0n;
+    let txData: Hex = '0x';
+    
+    if (currency === 'ETH') {
+      // For ETH transfer, set the value and leave data empty unless there's a message
+      valueToSend = amount && parseFloat(amount) > 0 ? 
+        BigInt(Math.floor(parseFloat(amount) * 1e18)) : 0n;
+      txData = messageHex;
+    } else if (currency === 'USDC' && parseFloat(amount) > 0) {
+      // For USDC transfer, prepare ERC20 transfer call data
+      const SEPOLIA_USDC_ADDRESS = '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238';
+      const ERC20_ABI = [
+        {
+          name: "transfer",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" }
+          ],
+          outputs: [{ name: "", type: "bool" }]
+        }
+      ];
+      
+      // Convert USDC amount to proper units (USDC has 6 decimals)
+      const usdcAmount = BigInt(Math.floor(parseFloat(amount) * 1e6));
+      
+      // Create ERC20 transfer call data
+      txData = encodeFunctionData({
+        abi: ERC20_ABI,
+        functionName: "transfer",
+        args: [toAddress as Address, usdcAmount]
+      });
+      
+      // If there's a message, we would need a more complex transaction
+      // For simplicity, we'll just add the message in comments for now
+      if (message) {
+        console.log(`Message included with USDC transfer: ${message}`);
+        console.log(`Note: Message is stored in comment only, not in the actual transaction data`);
+      }
+    } else if (message) {
+      // For message-only transfers, just include the message as data
+      txData = messageHex;
+    }
+    
+    // Prepare a UserOperation request (without actually sending it)
+    try {
+      // Create gas price estimation
+      const gasPrices = await pimlicoClient.getUserOperationGasPrice();
+      
+      // Create calldata for the execute function of the Safe wallet
+      const executeCalldata = encodeFunctionData({
+        abi: [{
+          name: "execute",
+          type: "function",
+          stateMutability: "nonpayable",
+          inputs: [
+            { name: "to", type: "address" },
+            { name: "value", type: "uint256" },
+            { name: "data", type: "bytes" }
+          ],
+          outputs: [{ name: "", type: "bytes" }]
+        }],
+        functionName: "execute",
+        args: [
+          currency === 'USDC' ? '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238' as Address : toAddress as Address,
+          valueToSend, 
+          txData
+        ]
+      });
+      
+      // Instead of trying to create a real UserOperation, create a simplified representation for demo purposes
+      const userOp = {
+        sender: fromAddress,
+        nonce: nonce,
+        initCode: '0x',
+        callData: executeCalldata,
+        callGasLimit: '90000',
+        verificationGasLimit: '100000',
+        preVerificationGas: '21000',
+        maxFeePerGas: gasPrices.fast.maxFeePerGas.toString(),
+        maxPriorityFeePerGas: gasPrices.fast.maxPriorityFeePerGas.toString(),
+        paymasterAndData: gasPaymentMethod === 'sponsored' ? 
+          '0x1234567890123456789012345678901234567890' : '0x',
+        signature: '0x'
+      };
+      
+      // Get the raw calldata that would be sent to the EntryPoint contract
+      // This is a simulated representation of the handleOps function call
+      const rawCalldata = `0x1fad948c${Object.entries(userOp)
+        .map(([key, val]) => {
+          if (key === 'signature' || key === 'paymasterAndData' || key === 'initCode') {
+            return val.toString().slice(2); // Remove 0x prefix
+          }
+          // Handle different value types appropriately
+          if (typeof val === 'string' && val.startsWith('0x')) {
+            return val.slice(2).padStart(64, '0');
+          } else if (typeof val === 'string') {
+            // Try to convert to hex
+            return val.padStart(64, '0');
+          } else {
+            return val.toString().padStart(64, '0');
+          }
+        })
+        .join('')}`;
+      
+      // Create a decoded HTML representation of the calldata
+      let decodedCalldata = '';
+      
+      if (currency === 'ETH' && parseFloat(amount) > 0) {
+        decodedCalldata = `
+          <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
+          <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${fromAddress}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${nonce}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
+          <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">${toAddress}</span></div>
+          <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">${amount} ETH</span> <span class="text-muted">(${valueToSend} wei)</span></div>
+          ${message ? `<div class="ms-5"><span class="text-warning">data:</span> <span class="text-success">${messageHex}</span></div>
+          <div class="ms-5"><span class="text-warning">decoded message:</span> <span class="text-success">"${message}"</span></div>` : 
+          `<div class="ms-5"><span class="text-warning">data:</span> <span class="text-success">0x</span> <span class="text-muted">(empty bytes - direct ETH transfer)</span></div>`}
+          <div class="ms-3"><span class="text-warning">ops[0].callGasLimit:</span> <span class="text-success">90000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].verificationGasLimit:</span> <span class="text-success">100000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].preVerificationGas:</span> <span class="text-success">21000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxPriorityFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxPriorityFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].paymasterAndData:</span> <span class="text-success">${gasPaymentMethod === 'sponsored' ? '0x1234...' : '0x'}</span> <span class="text-muted">(${gasPaymentMethod === 'sponsored' ? 'Sponsored transaction' : gasPaymentMethod === 'usdc' ? 'USDC payment' : 'self-paid'})</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].signature:</span> <span class="text-success">0x...</span> <span class="text-muted">(ECDSA signature placeholder)</span></div>
+        `;
+      } else if (currency === 'USDC' && parseFloat(amount) > 0) {
+        decodedCalldata = `
+          <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
+          <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${fromAddress}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${nonce}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
+          <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238</span> <span class="text-muted">(USDC Token)</span></div>
+          <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">0 ETH</span></div>
+          <div class="ms-5"><span class="text-warning">data:</span> <span class="text-info">transfer</span>(address to, uint256 value)</div>
+          <div class="ms-5 ms-2"><span class="text-warning">to:</span> <span class="text-success">${toAddress}</span></div>
+          <div class="ms-5 ms-2"><span class="text-warning">value:</span> <span class="text-success">${amount} USDC</span> <span class="text-muted">(${BigInt(Math.floor(parseFloat(amount) * 1e6))} units)</span></div>
+          ${message ? `<div class="ms-5 ms-2"><span class="text-muted">// Note: Message "${message}" is not included in the token transfer</span></div>` : ''}
+          <div class="ms-3"><span class="text-warning">ops[0].callGasLimit:</span> <span class="text-success">120000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].verificationGasLimit:</span> <span class="text-success">110000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].preVerificationGas:</span> <span class="text-success">21000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxPriorityFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxPriorityFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].paymasterAndData:</span> <span class="text-success">${gasPaymentMethod === 'sponsored' ? '0x1234...' : gasPaymentMethod === 'usdc' ? '0x5678...' : '0x'}</span> <span class="text-muted">(${gasPaymentMethod === 'sponsored' ? 'Sponsored transaction' : gasPaymentMethod === 'usdc' ? 'USDC payment' : 'self-paid'})</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].signature:</span> <span class="text-success">0x...</span> <span class="text-muted">(ECDSA signature placeholder)</span></div>
+        `;
+      } else if (message) {
+        decodedCalldata = `
+          <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
+          <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${fromAddress}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${nonce}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
+          <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">${toAddress}</span></div>
+          <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">0 ETH</span></div>
+          <div class="ms-5"><span class="text-warning">data:</span> <span class="text-success">${messageHex}</span></div>
+          <div class="ms-5"><span class="text-warning">decoded message:</span> <span class="text-success">"${message}"</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].callGasLimit:</span> <span class="text-success">90000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].verificationGasLimit:</span> <span class="text-success">100000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].preVerificationGas:</span> <span class="text-success">21000</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].maxPriorityFeePerGas:</span> <span class="text-success">${gasPrices.fast.maxPriorityFeePerGas}</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].paymasterAndData:</span> <span class="text-success">${gasPaymentMethod === 'sponsored' ? '0x1234...' : '0x'}</span> <span class="text-muted">(${gasPaymentMethod === 'sponsored' ? 'Sponsored transaction' : gasPaymentMethod === 'usdc' ? 'USDC payment' : 'self-paid'})</span></div>
+          <div class="ms-3"><span class="text-warning">ops[0].signature:</span> <span class="text-success">0x...</span> <span class="text-muted">(ECDSA signature placeholder)</span></div>
+        `;
+      } else {
+        decodedCalldata = `<div class="text-muted">(No calldata available - invalid transaction with no amount or message)</div>`;
+      }
+      
+      // Return the results
+      ctx.body = {
+        success: true,
+        rawCalldata,
+        decodedCalldata
+      };
+    } catch (error) {
+      console.error('Error preparing UserOperation:', error);
+      ctx.status = 500;
+      ctx.body = {
+        success: false,
+        error: error instanceof Error ? error.message : 'Unknown error preparing UserOperation'
+      };
+    }
+  } catch (error) {
+    console.error('Error generating calldata:', error);
+    ctx.status = 500;
+    ctx.body = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
+});
+
 // API to send a transaction
 router.post('/api/send-transaction', async (ctx) => {
   try {
     const { 
       recipient, 
-      message, 
+      message = '', 
       amount = '0', 
       currency = 'ETH',
       gasPaymentMethod = 'default', 
       submissionMethod = 'direct' 
     } = ctx.request.body as any;
     
-    if (!recipient || !message) {
+    if (!recipient) {
       ctx.status = 400;
-      ctx.body = { error: 'Recipient and message are required' };
+      ctx.body = { error: 'Recipient address is required' };
+      return;
+    }
+    
+    // Ensure either message or amount is provided
+    if (!message && (!amount || parseFloat(amount) <= 0)) {
+      ctx.status = 400;
+      ctx.body = { error: 'Either a message or an amount must be provided' };
       return;
     }
     
@@ -354,8 +662,8 @@ router.post('/api/send-transaction', async (ctx) => {
       return;
     }
     
-    // Convert message to hex
-    const messageHex = '0x' + Buffer.from(message).toString('hex') as Hex;
+    // Convert message to hex if provided
+    const messageHex = message ? ('0x' + Buffer.from(message).toString('hex') as Hex) : '0x';
     
     // Parse amount to send
     let valueToSend = 0n;

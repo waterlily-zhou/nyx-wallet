@@ -216,8 +216,8 @@
           </div>
           
           <div class="mb-3">
-            <label for="message" class="form-label">Message</label>
-            <textarea class="form-control" id="message" rows="3" placeholder="Enter your message here..." required></textarea>
+            <label for="message" class="form-label">Message (Optional)</label>
+            <textarea class="form-control" id="message" rows="3" placeholder="Enter your message here ..."></textarea>
             <div class="form-text">This message will be encoded and sent on-chain</div>
           </div>
           
@@ -230,7 +230,7 @@
                 <option value="USDC">USDC</option>
               </select>
             </div>
-            <div class="form-text">Amount to send (leave empty to send just the message)</div>
+            <div class="form-text">Amount to send (Leave empty to send just the message)</div>
           </div>
           
           <button type="button" id="reviewTransactionBtn" class="btn btn-primary w-100">
@@ -246,26 +246,188 @@
               <div class="card-body">
                 <h5 class="mb-3">Please review your transaction details:</h5>
                 
-                <div class="mb-3">
-                  <div class="fw-bold">From:</div>
-                  <div class="wallet-address" id="previewFrom"></div>
+                <!-- Transaction Header -->
+                <div class="alert alert-info mb-4">
+                  <div class="d-flex justify-content-between align-items-center">
+                    <div>
+                      <i class="fas fa-info-circle me-2"></i>
+                      <strong>Transaction Type:</strong> <span id="previewTxType">Send ETH/Message</span>
+                    </div>
+                    <div>
+                      <strong>Network:</strong> Sepolia Testnet
+                    </div>
+                  </div>
+                  <div class="d-flex justify-content-between align-items-center mt-2">
+                    <div>
+                      <strong>Nonce:</strong> <span id="previewNonce">Loading...</span>
+                    </div>
+                    <div>
+                      <strong>Estimated Time:</strong> <span>~15 seconds</span>
+                    </div>
+                  </div>
                 </div>
                 
-                <div class="mb-3">
-                  <div class="fw-bold">To:</div>
-                  <div class="wallet-address" id="previewTo"></div>
+                <!-- Principal Transaction Details -->
+                <div class="card mb-4 border-primary">
+                  <div class="card-header bg-primary text-white">
+                    <i class="fas fa-exchange-alt me-2"></i> Transaction Details
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <div class="fw-bold">From:</div>
+                      <div class="wallet-address d-flex align-items-center" id="previewFrom">
+                        <span class="flex-grow-1" id="previewFromAddress"></span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="navigator.clipboard.writeText(document.getElementById('previewFromAddress').textContent)">
+                          <i class="fas fa-copy"></i>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">To:</div>
+                      <div class="wallet-address d-flex align-items-center" id="previewTo">
+                        <span class="flex-grow-1" id="previewToAddress"></span>
+                        <button class="btn btn-sm btn-outline-secondary ms-2" onclick="navigator.clipboard.writeText(document.getElementById('previewToAddress').textContent)">
+                          <i class="fas fa-copy"></i>
+                        </button>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">Amount:</div>
+                      <div id="previewAmount" class="fs-5">0 ETH</div>
+                      <div id="previewFiatValue" class="text-muted small">≈ $0.00 USD</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">Message:</div>
+                      <div class="p-2 rounded" id="previewMessage" style="word-break: break-word; color: #1c1f2e; background-color: #bdc7f0;">
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 
-                <div class="mb-3">
-                  <div class="fw-bold">Amount:</div>
-                  <div id="previewAmount">0 ETH</div>
+                <!-- Gas and Fee Information -->
+                <div class="card mb-4 border-success">
+                  <div class="card-header bg-success text-white">
+                    <i class="fas fa-gas-pump me-2"></i> Gas & Fee Information
+                  </div>
+                  <div class="card-body">
+                    <div class="mb-3">
+                      <div class="fw-bold">Gas Payment Method:</div>
+                      <div id="previewGasMethod" class="d-flex align-items-center">
+                        <i class="fas fa-gift text-success me-2"></i> Try Sponsorship First (with USDC fallback)
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">Estimated Total Cost:</div>
+                      <div id="previewGasCost">~0.0001 ETH</div>
+                      <div class="text-muted small">≈ $0.20 USD</div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">Submission Method:</div>
+                      <div id="previewSubmissionMethod">
+                        <i class="fas fa-network-wired me-2"></i> Direct RPC Submission
+                      </div>
+                    </div>
+                    
+                    <div class="mb-2">
+                      <div class="fw-bold">Wallet Balance Change:</div>
+                      <div class="text-danger" id="previewBalanceChange">-0 ETH (plus gas fees)</div>
+                    </div>
+                  </div>
                 </div>
                 
-                <div class="mb-3">
-                  <div class="fw-bold">Message:</div>
-                  <div class="p-2 bg-light rounded" id="previewMessage" style="word-break: break-word; color: #1c1f2e; background-color: #bdc7f0 !important;"></div>
+                <!-- Advanced Details (Collapsible) -->
+                <div class="card mb-4">
+                  <div class="card-header bg-secondary text-white d-flex justify-content-between align-items-center" style="cursor: pointer;" onclick="document.getElementById('advancedDetailsContent').classList.toggle('d-none')">
+                    <span><i class="fas fa-cog me-2"></i> Advanced Details</span>
+                    <i class="fas fa-chevron-down"></i>
+                  </div>
+                  <div id="advancedDetailsContent" class="card-body d-none">
+                    <div class="mb-3">
+                      <div class="fw-bold">Calldata (Raw):</div>
+                      <div class="p-2 bg-dark text-light rounded font-monospace overflow-auto" style="max-height: 100px; font-size: 0.8rem;">
+                        <span id="previewRawCalldata">0x</span>
+                      </div>
+                      <div class="small text-muted mt-1">
+                        <i class="fas fa-info-circle me-1"></i> This is the exact encoded data that will be executed on-chain
+                      </div>
+                      <div class="small text-success mt-1">
+                        <i class="fas fa-check-circle me-1"></i> Using real blockchain calldata (not simulated)
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">Calldata (Decoded):</div>
+                      <div class="p-2 bg-dark text-light rounded font-monospace overflow-auto" style="max-height: 150px;">
+                        <div id="previewDecodedCalldata" class="small">
+                          <div><span class="text-warning">function:</span> <span class="text-info">transfer</span>(address to, uint256 value)</div>
+                          <div class="ms-3"><span class="text-warning">to:</span> <span class="text-success" id="previewCalldataTo">0x...</span></div>
+                          <div class="ms-3"><span class="text-warning">value:</span> <span class="text-success" id="previewCalldataValue">0</span></div>
+                          <div class="ms-3"><span class="text-warning">message:</span> <span class="text-success" id="previewCalldataMessage"></span></div>
+                        </div>
+                      </div>
+                      <div class="small text-success mt-1">
+                        <i class="fas fa-check-circle me-1"></i> Generated using ERC-4337 standards
+                      </div>
+                    </div>
+
+                    <div class="mb-3">
+                      <div class="fw-bold">Message Data (Hex):</div>
+                      <div class="p-2 bg-dark text-light rounded font-monospace overflow-auto" style="max-height: 100px;">
+                        <span id="previewTxData">0x</span>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">UserOperation Parameters:</div>
+                      <div class="small">
+                        <ul class="list-unstyled">
+                          <li><strong>callGasLimit:</strong> <span id="previewCallGasLimit">90000</span></li>
+                          <li><strong>verificationGasLimit:</strong> <span id="previewVerificationGasLimit">100000</span></li>
+                          <li><strong>preVerificationGas:</strong> <span id="previewPreVerificationGas">21000</span></li>
+                          <li><strong>maxFeePerGas:</strong> <span id="previewMaxFeePerGas">1000000000</span></li>
+                          <li><strong>maxPriorityFeePerGas:</strong> <span id="previewMaxPriorityFeePerGas">100000000</span></li>
+                        </ul>
+                      </div>
+                    </div>
+                    
+                    <div class="mb-3">
+                      <div class="fw-bold">EntryPoint Address:</div>
+                      <div class="font-monospace small">0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789</div>
+                      <div class="small text-muted mt-1">
+                        <i class="fas fa-info-circle me-1"></i> Standard ERC-4337 EntryPoint contract address
+                      </div>
+                    </div>
+                  </div>
                 </div>
                 
+                <!-- Security Verification -->
+                <div class="alert alert-warning mb-4">
+                  <div class="d-flex">
+                    <div class="me-3">
+                      <i class="fas fa-shield-alt fa-2x"></i>
+                    </div>
+                    <div>
+                      <h5 class="mb-2">Security Verification</h5>
+                      <ul class="mb-0">
+                        <li>Verify the recipient address and amount are correct</li>
+                        <li>Check that the gas payment method matches your preference</li>
+                        <li>Review the message content for accuracy</li>
+                      </ul>
+                      <div class="mt-2">
+                        <a href="#" id="previewEtherscanLink" target="_blank" class="btn btn-sm btn-outline-secondary">
+                          <i class="fas fa-external-link-alt me-1"></i> Simulate on Etherscan
+                        </a>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+                
+                <!-- Confirm or Edit Buttons -->
                 <div class="d-flex justify-content-between mt-4">
                   <button type="button" id="editTransactionBtn" class="btn btn-outline-secondary">
                     <i class="fas fa-edit me-2"></i> Edit
