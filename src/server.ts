@@ -11,6 +11,7 @@ import { sepolia } from 'viem/chains';
 import { validateEnvironment, createOwnerAccount, createPublicClientForSepolia, createPimlicoClientInstance, createSafeSmartAccount } from './utils/client-setup.js';
 import { sendTransaction, GasPaymentMethod } from './usdc-gas-payment.js';
 import { createSmartAccountClient } from 'permissionless';
+import { verifyCalldata, checkRecipientRisk, simulateTransaction, checkEtherscanData, aiTransactionAnalysis } from './utils/transaction-safety.js';
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -734,6 +735,74 @@ router.post('/api/send-transaction', async (ctx) => {
     ctx.body = { 
       success: false, 
       error: error instanceof Error ? error.message : 'Unknown error' 
+    };
+  }
+});
+
+// API for AI-powered transaction safety check
+router.post('/api/transaction-safety-check', async (ctx) => {
+  try {
+    const { 
+      sender, 
+      recipient, 
+      amount, 
+      currency, 
+      message,
+      calldata, 
+      displayedData,
+      gasPaymentMethod,
+      submissionMethod 
+    } = ctx.request.body as any;
+    
+    if (!recipient || !calldata) {
+      ctx.status = 400;
+      ctx.body = { error: 'Recipient and calldata are required' };
+      return;
+    }
+    
+    // 1. Call Data Verification - Check if displayed data matches calldata
+    const calldataVerification = verifyCalldata(calldata, displayedData);
+    
+    // 2. Recipient Risk Assessment - Check for suspicious activity
+    const recipientRisk = await checkRecipientRisk(recipient);
+    
+    // 3. Transaction Simulation - Simulate the transaction
+    const simulationResults = await simulateTransaction({
+      sender,
+      recipient,
+      callData: calldata,
+      value: currency === 'ETH' && amount ? BigInt(Math.floor(parseFloat(amount) * 1e18)).toString() : '0'
+    });
+    
+    // 4. Etherscan Data Check - Check for suspicious activity
+    const etherscanData = await checkEtherscanData(recipient);
+    
+    // 5. AI Analysis - Analyze all collected data
+    const aiAnalysis = await aiTransactionAnalysis({
+      calldataVerification,
+      recipientRisk,
+      simulationResults,
+      etherscanData,
+      transactionType: currency === 'ETH' ? 'ETH Transfer' : 'USDC Transfer',
+      amount,
+      currency,
+      message
+    });
+    
+    ctx.body = {
+      success: true,
+      calldataVerification,
+      recipientRisk,
+      simulationResults,
+      etherscanData,
+      aiAnalysis
+    };
+  } catch (error) {
+    console.error('Error in transaction safety check:', error);
+    ctx.status = 500;
+    ctx.body = {
+      success: false,
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 });

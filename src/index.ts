@@ -14,7 +14,6 @@ async function main() {
     const { smartAccountClient, smartAccount, publicClient } = await initializeSafeClients();
     
     console.log('Smart account created successfully!');
-    console.log('Now you can use this smart account to perform transactions.');
     console.log('To fund your wallet, send ETH to:', smartAccount.address);
     console.log('Explorer: https://sepolia.etherscan.io/address/' + smartAccount.address);
     
