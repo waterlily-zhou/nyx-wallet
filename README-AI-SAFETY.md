@@ -32,7 +32,7 @@ The AI transaction verification system performs the following checks:
    - Flags newly deployed or unverified contracts
 
 5. **AI Analysis**
-   - Uses GPT-4 to analyze all collected data
+   - Uses Claude (Anthropic) to analyze all collected data
    - Provides a comprehensive safety score from 0-100
    - Offers clear recommendations for the user
    - Identifies red flags in plain language
@@ -56,7 +56,7 @@ ETHERSCAN_API_KEY=your_etherscan_api_key
 TENDERLY_ACCESS_KEY=your_tenderly_access_key
 TENDERLY_USER=your_tenderly_username
 TENDERLY_PROJECT=your_tenderly_project
-OPENAI_API_KEY=your_openai_api_key
+CLAUDE_API_KEY=your_claude_api_key
 ```
 
 If any API key is missing, the system will still function with reduced capabilities.

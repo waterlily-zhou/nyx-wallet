@@ -187,13 +187,24 @@ document.addEventListener('DOMContentLoaded', function() {
     const confirmTransactionBtn = document.getElementById('confirmTransactionBtn');
     const transactionPreview = document.getElementById('transactionPreview');
     
+    // Helper functions to get selected methods
+    function getSelectedGasPaymentMethod() {
+      const selectedGasOptionEl = document.querySelector('input[name="gasPayment"]:checked');
+      return selectedGasOptionEl ? selectedGasOptionEl.value : 'default';
+    }
+    
+    function getSelectedSubmissionMethod() {
+      const selectedSubmissionMethodEl = document.querySelector('input[name="submissionMethod"]:checked');
+      return selectedSubmissionMethodEl ? selectedSubmissionMethodEl.value : 'direct';
+    }
+    
     // Preview elements
     const previewFrom = document.getElementById('previewFrom');
     const previewTo = document.getElementById('previewTo');
     const previewAmount = document.getElementById('previewAmount');
     const previewMessage = document.getElementById('previewMessage');
     
-    // Show transaction preview
+    // Handle transaction form submission
     if (reviewTransactionBtn) {
       reviewTransactionBtn.addEventListener('click', function() {
         const recipientInput = document.getElementById('recipient');
@@ -228,18 +239,10 @@ document.addEventListener('DOMContentLoaded', function() {
           return;
         }
         
-        // Determine transaction type
-        let txType = '';
-        if (message && (!amount || amount === '0')) {
-          txType = 'Send Message';
-        } else if ((!message || message === '') && amount && amount !== '0') {
-          txType = `Send ${currency}`;
-        } else {
-          txType = `Send ${currency} with Message`;
-        }
-        
         // Format wallet addresses
-        const fromAddress = smartAccountAddress;
+        const fromAddress = document.querySelector('.wallet-address') ? 
+          document.querySelector('.wallet-address').textContent.trim() : 
+          smartAccountAddress;
         const toAddress = recipient;
         
         // Get nonce from the server
@@ -258,60 +261,89 @@ document.addEventListener('DOMContentLoaded', function() {
                 
                 // Update all preview elements
                 updatePreviewFields({
-                  txType,
-                  nonce,
                   fromAddress,
                   toAddress,
                   amount,
                   currency,
                   message,
+                  nonce,
                   gasPaymentMethod,
                   submissionMethod
                 });
                 
-                // Show preview
-                if (transactionPreview) transactionPreview.style.display = 'block';
-                
                 // Scroll to preview
-                transactionPreview.scrollIntoView({ behavior: 'smooth' });
+                const transactionPreview = document.getElementById('transactionPreview');
+                if (transactionPreview) {
+                  transactionPreview.scrollIntoView({ behavior: 'smooth' });
+                }
+                
+                // Run security check after a short delay
+                setTimeout(() => {
+                  // Run security check automatically when preview is shown
+                  checkTransactionSafety();
+                  
+                  // Add "Re-run Security Check" button to the preview (in case they want to run it again)
+                  const previewButtons = document.querySelector('.d-flex.justify-content-between.mt-4');
+                  if (previewButtons && !document.getElementById('safetyCheckBtn')) {
+                    const safetyCheckBtn = document.createElement('button');
+                    safetyCheckBtn.type = 'button';
+                    safetyCheckBtn.id = 'safetyCheckBtn';
+                    safetyCheckBtn.className = 'btn btn-warning';
+                    safetyCheckBtn.innerHTML = '<i class="fas fa-shield-alt me-2"></i> Re-run Security Check';
+                    safetyCheckBtn.onclick = checkTransactionSafety;
+                    
+                    previewButtons.insertBefore(safetyCheckBtn, previewButtons.lastElementChild);
+                  }
+                }, 1000);
               })
               .catch(error => {
                 console.error('Error checking recipient:', error);
+                
+                // Update preview anyway even if we couldn't check if recipient is new
                 updatePreviewFields({
-                  txType,
-                  nonce,
                   fromAddress,
                   toAddress,
                   amount,
                   currency,
                   message,
+                  nonce,
                   gasPaymentMethod,
                   submissionMethod
                 });
                 
                 // Show preview even if we couldn't check if recipient is new
-                if (transactionPreview) transactionPreview.style.display = 'block';
-                transactionPreview.scrollIntoView({ behavior: 'smooth' });
+                const transactionPreview = document.getElementById('transactionPreview');
+                if (transactionPreview) {
+                  transactionPreview.scrollIntoView({ behavior: 'smooth' });
+                }
+                
+                // Still run the security check
+                setTimeout(() => checkTransactionSafety(), 1000);
               });
           })
           .catch(error => {
             console.error('Error fetching nonce:', error);
+            
             // Update with placeholder nonce
             updatePreviewFields({
-              txType: txType,
-              nonce: 'N/A',
               fromAddress,
               toAddress,
               amount,
               currency,
               message,
+              nonce: 'N/A', 
               gasPaymentMethod,
               submissionMethod
             });
             
             // Show preview anyway
-            if (transactionPreview) transactionPreview.style.display = 'block';
-            transactionPreview.scrollIntoView({ behavior: 'smooth' });
+            const transactionPreview = document.getElementById('transactionPreview');
+            if (transactionPreview) {
+              transactionPreview.scrollIntoView({ behavior: 'smooth' });
+            }
+            
+            // Still try to run security check
+            setTimeout(() => checkTransactionSafety(), 1000);
           });
       });
     }
@@ -331,240 +363,274 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
     
-    // Function to update all transaction preview fields
+    // Add these global variables to store transaction data securely
+    let currentTransactionData = {
+      rawCalldata: null,
+      decodedCalldata: null,
+      recipient: null,
+      amount: null,
+      currency: null,
+      message: null,
+      fromAddress: null,
+      nonce: null,
+      gasPaymentMethod: null,
+      submissionMethod: null
+    };
+
+    // Update the updatePreviewFields function to use our secure approach
     function updatePreviewFields(data) {
-      // Update basic transaction info
-      const previewTxType = document.getElementById('previewTxType');
-      if (previewTxType) previewTxType.textContent = data.txType;
+      const transactionPreview = document.getElementById('transactionPreview');
+      if (!transactionPreview) return;
+      
+      // Display the transaction preview
+      transactionPreview.style.display = 'block';
+      
+      // Store data securely in our global variable
+      currentTransactionData.recipient = data.toAddress;
+      currentTransactionData.amount = data.amount;
+      currentTransactionData.currency = data.currency;
+      currentTransactionData.message = data.message;
+      currentTransactionData.fromAddress = data.fromAddress;
+      currentTransactionData.nonce = data.nonce;
+      currentTransactionData.gasPaymentMethod = data.gasPaymentMethod;
+      currentTransactionData.submissionMethod = data.submissionMethod;
+      
+      // Set values in UI elements
+      // Transaction parameters
+      const previewType = document.getElementById('previewType');
+      if (previewType) previewType.textContent = parseFloat(data.amount) > 0 ? 
+        `${data.currency} Transfer` : 'Message Only';
+      
+      const previewNetwork = document.getElementById('previewNetwork');
+      if (previewNetwork) previewNetwork.textContent = 'Sepolia Testnet';
       
       const previewNonce = document.getElementById('previewNonce');
       if (previewNonce) previewNonce.textContent = data.nonce;
       
-      // Update addresses
+      const previewEstimatedTime = document.getElementById('previewEstimatedTime');
+      if (previewEstimatedTime) previewEstimatedTime.textContent = '~15 seconds';
+      
+      // Addresses
       const previewFromAddress = document.getElementById('previewFromAddress');
       if (previewFromAddress) previewFromAddress.textContent = data.fromAddress;
       
       const previewToAddress = document.getElementById('previewToAddress');
       if (previewToAddress) previewToAddress.textContent = data.toAddress;
       
-      // Update amount and message
-      const previewAmount = document.getElementById('previewAmount');
-      if (previewAmount) previewAmount.textContent = `${data.amount} ${data.currency}`;
-      
-      // Update estimated fiat value
-      const previewFiatValue = document.getElementById('previewFiatValue');
-      if (previewFiatValue) {
-        // Current rough price estimates (would be fetched from an API in production)
-        const priceMap = {
-          'ETH': 2500,
-          'USDC': 1
-        };
-        const price = priceMap[data.currency] || 0;
-        const estimatedValue = parseFloat(data.amount) * price; 
-        previewFiatValue.textContent = `≈ $${estimatedValue.toFixed(2)} USD`;
-      }
-      
+      // Message and amount
       const previewMessage = document.getElementById('previewMessage');
       if (previewMessage) {
         if (data.message) {
           previewMessage.textContent = data.message;
-          previewMessage.style.display = 'block';
+          previewMessage.parentElement.style.display = 'block';
         } else {
-          previewMessage.textContent = '(No message)';
-          previewMessage.style.display = 'block';
+          previewMessage.parentElement.style.display = 'none';
         }
       }
       
-      // Update gas details
-      const previewGasMethod = document.getElementById('previewGasMethod');
-      if (previewGasMethod) {
-        let iconClass = 'fas fa-gift text-success';
-        let methodText = 'Try Sponsorship First (with USDC fallback)';
-        
+      const previewAmount = document.getElementById('previewAmount');
+      if (previewAmount) {
+        if (parseFloat(data.amount) > 0) {
+          previewAmount.textContent = `${data.amount} ${data.currency}`;
+          previewAmount.parentElement.style.display = 'block';
+        } else {
+          previewAmount.parentElement.style.display = 'none';
+        }
+      }
+      
+      // Gas payment method
+      const previewGasPaymentMethod = document.getElementById('previewGasPaymentMethod');
+      if (previewGasPaymentMethod) {
+        let gasMethod = 'Self-paid (ETH)';
         if (data.gasPaymentMethod === 'sponsored') {
-          methodText = 'Sponsored Only (free, may be rejected)';
+          gasMethod = 'Sponsored (free)';
         } else if (data.gasPaymentMethod === 'usdc') {
-          iconClass = 'fas fa-money-bill';
-          methodText = 'USDC Payment Only';
+          gasMethod = 'Pay with USDC';
         }
-        
-        previewGasMethod.innerHTML = `<i class="${iconClass} me-2"></i> ${methodText}`;
+        previewGasPaymentMethod.textContent = gasMethod;
       }
       
-      // Update estimated gas cost
-      const previewGasCost = document.getElementById('previewGasCost');
-      if (previewGasCost) {
-        // Fixed estimate for demo purposes. In production, this would be a real calculation.
-        const gasEstimate = '~0.0001 ETH';
-        previewGasCost.textContent = gasEstimate;
+      // Gas estimation (simplified)
+      const previewEstimatedGasCost = document.getElementById('previewEstimatedGasCost');
+      if (previewEstimatedGasCost) {
+        if (data.gasPaymentMethod === 'sponsored') {
+          previewEstimatedGasCost.innerHTML = '0 ETH <span class="text-success">(sponsored)</span>';
+        } else if (data.gasPaymentMethod === 'usdc') {
+          previewEstimatedGasCost.innerHTML = '~0.50 USDC';
+        } else {
+          previewEstimatedGasCost.textContent = '~0.0005 ETH';
+        }
       }
       
-      // Update submission method
+      // Estimated total cost
+      const previewEstimatedTotalCost = document.getElementById('previewEstimatedTotalCost');
+      if (previewEstimatedTotalCost) {
+        if (data.currency === 'ETH' && parseFloat(data.amount) > 0) {
+          const gasCost = data.gasPaymentMethod === 'sponsored' ? 0 : 0.0005;
+          const totalETH = data.gasPaymentMethod === 'usdc' || data.gasPaymentMethod === 'sponsored' ? 
+            parseFloat(data.amount) : 
+            parseFloat(data.amount) + gasCost;
+          previewEstimatedTotalCost.textContent = `~${totalETH.toFixed(4)} ETH`;
+        } else if (data.currency === 'USDC' && parseFloat(data.amount) > 0) {
+          if (data.gasPaymentMethod === 'usdc') {
+            const totalUSDC = parseFloat(data.amount) + 0.5;
+            previewEstimatedTotalCost.textContent = `~${totalUSDC.toFixed(2)} USDC`;
+          } else if (data.gasPaymentMethod === 'sponsored') {
+            previewEstimatedTotalCost.textContent = `${data.amount} USDC`;
+          } else {
+            previewEstimatedTotalCost.textContent = `${data.amount} USDC + ~0.0005 ETH (gas)`;
+          }
+        } else {
+          // Message only
+          if (data.gasPaymentMethod === 'sponsored') {
+            previewEstimatedTotalCost.textContent = '0 ETH (sponsored)';
+          } else if (data.gasPaymentMethod === 'usdc') {
+            previewEstimatedTotalCost.textContent = '~0.50 USDC (gas only)';
+          } else {
+            previewEstimatedTotalCost.textContent = '~0.0005 ETH (gas only)';
+          }
+        }
+      }
+      
+      // Submission method
       const previewSubmissionMethod = document.getElementById('previewSubmissionMethod');
       if (previewSubmissionMethod) {
-        if (data.submissionMethod === 'direct') {
-          previewSubmissionMethod.innerHTML = '<i class="fas fa-network-wired me-2"></i> Direct RPC Submission';
-        } else {
-          previewSubmissionMethod.innerHTML = '<i class="fas fa-box me-2"></i> Bundler Service';
+        let submissionMethod = 'Direct (Bundler API)';
+        if (data.submissionMethod === 'flashbots') {
+          submissionMethod = 'Flashbots Protect';
+        } else if (data.submissionMethod === 'private') {
+          submissionMethod = 'Private RPC';
         }
+        previewSubmissionMethod.textContent = submissionMethod;
       }
       
-      // Update balance change
+      // Wallet balance change
       const previewBalanceChange = document.getElementById('previewBalanceChange');
       if (previewBalanceChange) {
-        if (parseFloat(data.amount) > 0) {
-          previewBalanceChange.textContent = `-${data.amount} ${data.currency} (plus gas fees)`;
+        if (data.currency === 'ETH' && parseFloat(data.amount) > 0) {
+          const gasCost = data.gasPaymentMethod === 'sponsored' ? 0 : 0.0005;
+          const totalETH = data.gasPaymentMethod === 'usdc' || data.gasPaymentMethod === 'sponsored' ? 
+            parseFloat(data.amount) : 
+            parseFloat(data.amount) + gasCost;
+          
+          previewBalanceChange.innerHTML = `-${totalETH.toFixed(4)} ETH`;
+        } else if (data.currency === 'USDC' && parseFloat(data.amount) > 0) {
+          if (data.gasPaymentMethod === 'usdc') {
+            const totalUSDC = parseFloat(data.amount) + 0.5;
+            previewBalanceChange.innerHTML = `-${totalUSDC.toFixed(2)} USDC`;
+          } else if (data.gasPaymentMethod === 'sponsored') {
+            previewBalanceChange.innerHTML = `-${data.amount} USDC`;
+          } else {
+            previewBalanceChange.innerHTML = `-${data.amount} USDC, -0.0005 ETH (gas)`;
+          }
         } else {
-          previewBalanceChange.textContent = 'Only gas fees';
+          // Message only
+          if (data.gasPaymentMethod === 'sponsored') {
+            previewBalanceChange.innerHTML = `0 ETH (sponsored)`;
+          } else if (data.gasPaymentMethod === 'usdc') {
+            previewBalanceChange.innerHTML = `-0.50 USDC (gas only)`;
+          } else {
+            previewBalanceChange.innerHTML = `-0.0005 ETH (gas only)`;
+          }
         }
       }
       
-      // Update transaction data
-      const previewTxData = document.getElementById('previewTxData');
-      if (previewTxData) {
-        // Create a placeholder for the transaction data
-        let txData = '0x';
-        if (data.message) {
-          // Use browser-friendly encoding without Buffer
-          txData = '0x' + Array.from(new TextEncoder().encode(data.message))
-            .map(b => b.toString(16).padStart(2, '0'))
-            .join('');
-        }
-        previewTxData.textContent = txData;
-      }
-      
-      // Generate and update calldata
+      // Calldata (raw and decoded) - Set loading state here and fetch async in separate function
       const previewRawCalldata = document.getElementById('previewRawCalldata');
-      const previewCalldataTo = document.getElementById('previewCalldataTo');
-      const previewCalldataValue = document.getElementById('previewCalldataValue');
-      const previewCalldataMessage = document.getElementById('previewCalldataMessage');
       const previewDecodedCalldata = document.getElementById('previewDecodedCalldata');
       
-      if (previewRawCalldata && previewDecodedCalldata) {
-        // Instead of generating calldata in the frontend, fetch it from the backend
+      // Set a loading state for the calldata
+      if (previewRawCalldata) previewRawCalldata.innerHTML = '<div class="spinner-border spinner-border-sm text-light" role="status"><span class="visually-hidden">Loading...</span></div> Generating calldata...';
+      if (previewDecodedCalldata) previewDecodedCalldata.innerHTML = '<div class="spinner-border spinner-border-sm text-light" role="status"><span class="visually-hidden">Loading...</span></div> Decoding calldata...';
+      
+      // Fetch calldata separately using our secure getCalldata function
+      getCalldata().catch(error => {
+        console.error('Error in getCalldata:', error);
+      });
+    }
+
+    // Replace the existing getCalldata function with our secure implementation
+    async function getCalldata() {
+      if (!currentTransactionData.fromAddress || !currentTransactionData.recipient) {
+        console.error('Missing required transaction data');
+        throw new Error('Missing required transaction data');
+      }
+      
+      try {
+        // Create request payload from our stored data
         const calldataRequest = {
-          fromAddress: data.fromAddress,
-          toAddress: data.toAddress,
-          amount: data.amount,
-          currency: data.currency,
-          message: data.message,
-          nonce: data.nonce,
-          gasPaymentMethod: data.gasPaymentMethod,
-          submissionMethod: data.submissionMethod
+          fromAddress: currentTransactionData.fromAddress,
+          toAddress: currentTransactionData.recipient,
+          amount: currentTransactionData.amount,
+          currency: currentTransactionData.currency,
+          message: currentTransactionData.message,
+          nonce: currentTransactionData.nonce || '0',
+          gasPaymentMethod: currentTransactionData.gasPaymentMethod || getSelectedGasPaymentMethod(),
+          submissionMethod: currentTransactionData.submissionMethod || getSelectedSubmissionMethod()
         };
         
-        // Set a loading state for the calldata
-        if (previewRawCalldata) previewRawCalldata.innerHTML = '<div class="spinner-border spinner-border-sm text-light" role="status"><span class="visually-hidden">Loading...</span></div> Generating calldata...';
-        if (previewDecodedCalldata) previewDecodedCalldata.innerHTML = '<div class="spinner-border spinner-border-sm text-light" role="status"><span class="visually-hidden">Loading...</span></div> Decoding calldata...';
-        
         // Fetch the actual calldata from the backend
-        fetch('/api/get-calldata', {
+        const response = await fetch('/api/get-calldata', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify(calldataRequest),
-        })
-          .then(response => response.json())
-          .then(calldataResult => {
-            // Update the raw calldata display with the complete calldata from backend
-            if (previewRawCalldata && calldataResult.rawCalldata) {
-              previewRawCalldata.textContent = calldataResult.rawCalldata;
-            } else {
-              previewRawCalldata.textContent = 'Error fetching calldata';
-            }
-            
-            // Update the decoded calldata with the properly decoded version from backend
-            if (previewDecodedCalldata && calldataResult.decodedCalldata) {
-              previewDecodedCalldata.innerHTML = calldataResult.decodedCalldata;
-            } else {
-              // Fallback to a simplified view if backend doesn't provide proper decoded view
-              // This is just a fallback - the backend should be doing the proper decoding
-              let decodedHtml = '';
-              
-              if (parseFloat(data.amount) > 0 && data.currency === 'ETH') {
-                decodedHtml = `
-                  <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
-                  <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${data.fromAddress}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${data.nonce}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
-                  <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">${data.toAddress}</span></div>
-                  <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">${data.amount} ETH</span></div>
-                  <div class="ms-5"><span class="text-warning">data:</span> <span class="text-success">0x</span> <span class="text-muted">(empty)</span></div>
-                  <div class="ms-3"><span class="text-muted">... and more UserOperation fields ...</span></div>
-                `;
-              } else if (parseFloat(data.amount) > 0 && data.currency === 'USDC') {
-                decodedHtml = `
-                  <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
-                  <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${data.fromAddress}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${data.nonce}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
-                  <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">USDC Contract</span></div>
-                  <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">0 ETH</span></div>
-                  <div class="ms-5"><span class="text-warning">data:</span> <span class="text-info">transfer</span>(address,uint256)</div>
-                  <div class="ms-3"><span class="text-muted">... and more UserOperation fields ...</span></div>
-                `;
-              } else if (data.message) {
-                decodedHtml = `
-                  <div><span class="text-danger">EntryPoint:</span> <span class="text-info">handleOps</span>(UserOperation[] calldata ops, address payable beneficiary)</div>
-                  <div class="ms-3"><span class="text-warning">ops[0].sender:</span> <span class="text-success">${data.fromAddress}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].nonce:</span> <span class="text-success">${data.nonce}</span></div>
-                  <div class="ms-3"><span class="text-warning">ops[0].callData:</span> <span class="text-info">execute</span>(address to, uint256 value, bytes data)</div>
-                  <div class="ms-5"><span class="text-warning">to:</span> <span class="text-success">${data.toAddress}</span></div>
-                  <div class="ms-5"><span class="text-warning">value:</span> <span class="text-success">0 ETH</span></div>
-                  <div class="ms-5"><span class="text-warning">message:</span> <span class="text-success">"${data.message}"</span></div>
-                  <div class="ms-3"><span class="text-muted">... and more UserOperation fields ...</span></div>
-                `;
-              } else {
-                decodedHtml = `<div class="text-muted">(No calldata available - invalid transaction)</div>`;
-              }
-              
-              previewDecodedCalldata.innerHTML = decodedHtml;
-            }
-          })
-          .catch(error => {
-            console.error('Error fetching calldata:', error);
-            previewRawCalldata.textContent = 'Error generating calldata';
-            
-            // Show simplified fallback
-            let fallbackDecodedHtml = `
-              <div class="text-danger">Failed to fetch calldata from server</div>
-              <div class="small mt-2">
-                <p>Basic transaction info:</p>
-                <ul>
-                  <li>From: ${data.fromAddress}</li>
-                  <li>To: ${data.toAddress}</li>
-                  <li>Amount: ${data.amount} ${data.currency}</li>
-                  ${data.message ? `<li>Message: "${data.message}"</li>` : ''}
-                </ul>
-              </div>
-            `;
-            previewDecodedCalldata.innerHTML = fallbackDecodedHtml;
-          });
-      }
-      
-      // Update UserOperation parameters
-      const previewCallGasLimit = document.getElementById('previewCallGasLimit');
-      if (previewCallGasLimit) previewCallGasLimit.textContent = '90000'; // Fixed example value
-      
-      const previewVerificationGasLimit = document.getElementById('previewVerificationGasLimit');
-      if (previewVerificationGasLimit) previewVerificationGasLimit.textContent = '100000'; // Fixed example value
-      
-      const previewPreVerificationGas = document.getElementById('previewPreVerificationGas');
-      if (previewPreVerificationGas) previewPreVerificationGas.textContent = '21000'; // Fixed example value
-      
-      // Update max fee parameters
-      const previewMaxFeePerGas = document.getElementById('previewMaxFeePerGas');
-      if (previewMaxFeePerGas) previewMaxFeePerGas.textContent = '1000000000'; // 1 Gwei
-      
-      const previewMaxPriorityFeePerGas = document.getElementById('previewMaxPriorityFeePerGas');
-      if (previewMaxPriorityFeePerGas) previewMaxPriorityFeePerGas.textContent = '100000000'; // 0.1 Gwei
-      
-      // Set Etherscan simulation link
-      const previewEtherscanLink = document.getElementById('previewEtherscanLink');
-      if (previewEtherscanLink) {
-        // Set link to Sepolia Etherscan with recipient address
-        previewEtherscanLink.href = `https://sepolia.etherscan.io/address/${data.toAddress}`;
+        });
+        
+        const calldataResult = await response.json();
+        
+        if (!calldataResult.success) {
+          throw new Error(calldataResult.error || 'Failed to generate calldata');
+        }
+        
+        // Store the calldata securely in our variable
+        currentTransactionData.rawCalldata = calldataResult.rawCalldata;
+        currentTransactionData.decodedCalldata = calldataResult.decodedCalldata;
+        
+        // Update UI elements
+        const previewRawCalldata = document.getElementById('previewRawCalldata');
+        const previewDecodedCalldata = document.getElementById('previewDecodedCalldata');
+        
+        if (previewRawCalldata) {
+          previewRawCalldata.textContent = calldataResult.rawCalldata;
+        }
+        
+        if (previewDecodedCalldata) {
+          previewDecodedCalldata.innerHTML = calldataResult.decodedCalldata;
+        }
+        
+        return true;
+      } catch (error) {
+        console.error('Error getting calldata:', error);
+        
+        // Update UI to show error
+        const previewRawCalldata = document.getElementById('previewRawCalldata');
+        const previewDecodedCalldata = document.getElementById('previewDecodedCalldata');
+        
+        if (previewRawCalldata) {
+          previewRawCalldata.textContent = 'Error generating calldata';
+        }
+        
+        if (previewDecodedCalldata) {
+          // Show simplified fallback
+          let fallbackDecodedHtml = `
+            <div class="text-danger">Failed to fetch calldata from server</div>
+            <div class="small mt-2">
+              <p>Basic transaction info:</p>
+              <ul>
+                <li>From: ${currentTransactionData.fromAddress}</li>
+                <li>To: ${currentTransactionData.recipient}</li>
+                <li>Amount: ${currentTransactionData.amount} ${currentTransactionData.currency}</li>
+                ${currentTransactionData.message ? `<li>Message: "${currentTransactionData.message}"</li>` : ''}
+              </ul>
+            </div>
+          `;
+          previewDecodedCalldata.innerHTML = fallbackDecodedHtml;
+        }
+        
+        displayError(`Failed to generate transaction: ${error.message}`);
+        return false;
       }
     }
     
@@ -575,23 +641,36 @@ document.addEventListener('DOMContentLoaded', function() {
       });
     }
     
-    // Add this function after the updatePreviewFields function but before the form submission handler
+    // Add toggleAdvancedSafetyDetails to window for global access
+    window.toggleAdvancedSafetyDetails = function() {
+      const detailsSection = document.getElementById('advancedSafetyDetails');
+      if (detailsSection) {
+        if (detailsSection.classList.contains('d-none')) {
+          detailsSection.classList.remove('d-none');
+        } else {
+          detailsSection.classList.add('d-none');
+        }
+      }
+    };
+
+    // Secure implementation of checkTransactionSafety
     async function checkTransactionSafety() {
-      // Get the current transaction data
-      const recipient = document.getElementById('recipient').value.trim();
-      const message = document.getElementById('message').value.trim();
-      const amount = document.getElementById('amount').value.trim() || '0';
-      const currency = document.getElementById('currency').value;
-      const fromAddress = document.getElementById('previewFromAddress').textContent;
-      const calldata = document.getElementById('previewRawCalldata').textContent;
+      // Use the securely stored transaction data instead of reading from DOM
+      if (!currentTransactionData.rawCalldata) {
+        console.error('No transaction data available');
+        displaySecurityError('No transaction data available. Please try again.');
+        return;
+      }
+      
+      // Get the current submission preferences that might have changed
       const selectedGasOptionEl = document.querySelector('input[name="gasPayment"]:checked');
       const selectedSubmissionMethodEl = document.querySelector('input[name="submissionMethod"]:checked');
       
-      // Display data that's shown to the user
+      // Display data that's shown to the user - create this from our stored data
       const displayedData = {
-        recipient: document.getElementById('previewToAddress').textContent,
-        amount: document.getElementById('previewAmount').textContent,
-        message: message
+        recipient: currentTransactionData.recipient,
+        amount: `${currentTransactionData.amount} ${currentTransactionData.currency}`,
+        message: currentTransactionData.message
       };
       
       // Show loading indicator in the security verification section
@@ -606,26 +685,35 @@ document.addEventListener('DOMContentLoaded', function() {
             </div>
             <div>
               <h5 class="mb-2">Security Analysis in Progress...</h5>
-              <p>Our AI is analyzing your transaction for potential security issues. This may take a few seconds.</p>
+              <p class="mb-2">Our AI is analyzing your transaction for potential risks. This may take a few seconds.</p>
+              <div class="progress mb-2" style="height: 8px;">
+                <div class="progress-bar progress-bar-striped progress-bar-animated bg-warning" style="width: 100%"></div>
+              </div>
+              <ul class="small mb-0">
+                <li><i class="fas fa-circle-notch fa-spin me-1"></i> Verifying call data...</li>
+                <li><i class="fas fa-circle-notch fa-spin me-1"></i> Checking recipient risk...</li>
+                <li><i class="fas fa-circle-notch fa-spin me-1"></i> Simulating transaction...</li>
+                <li><i class="fas fa-circle-notch fa-spin me-1"></i> Analyzing with AI...</li>
+              </ul>
             </div>
           </div>
         `;
       }
       
       try {
-        // Call the API endpoint
+        // Call the API endpoint with our securely stored data
         const response = await fetch('/api/transaction-safety-check', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            sender: fromAddress,
-            recipient,
-            amount,
-            currency,
-            message,
-            calldata,
+            sender: currentTransactionData.fromAddress,
+            recipient: currentTransactionData.recipient,
+            amount: currentTransactionData.amount,
+            currency: currentTransactionData.currency,
+            message: currentTransactionData.message,
+            calldata: currentTransactionData.rawCalldata,
             displayedData,
             gasPaymentMethod: selectedGasOptionEl ? selectedGasOptionEl.value : 'default',
             submissionMethod: selectedSubmissionMethodEl ? selectedSubmissionMethodEl.value : 'direct'
@@ -643,25 +731,30 @@ document.addEventListener('DOMContentLoaded', function() {
         
       } catch (error) {
         console.error('Error checking transaction safety:', error);
-        
-        // Show error in security verification section
-        if (securityVerification) {
-          securityVerification.innerHTML = `
-            <div class="d-flex">
-              <div class="me-3">
-                <i class="fas fa-exclamation-triangle fa-2x text-danger"></i>
-              </div>
-              <div>
-                <h5 class="mb-2">Security Analysis Failed</h5>
-                <p>We couldn't complete the security analysis. Please review the transaction carefully before sending.</p>
-                <p class="text-danger">Error: ${error.message}</p>
-              </div>
-            </div>
-          `;
-        }
+        displaySecurityError(error.message);
       }
     }
 
+    // Helper function for displaying security errors
+    function displaySecurityError(errorMessage) {
+      const securityVerification = document.querySelector('.alert-warning');
+      if (securityVerification) {
+        securityVerification.innerHTML = `
+          <div class="d-flex">
+            <div class="me-3">
+              <i class="fas fa-exclamation-triangle fa-2x text-danger"></i>
+            </div>
+            <div>
+              <h5 class="mb-2">Security Analysis Failed</h5>
+              <p>We couldn't complete the security analysis. Please review the transaction carefully before sending.</p>
+              <p class="text-danger">Error: ${errorMessage}</p>
+            </div>
+          </div>
+        `;
+      }
+    }
+
+    // Function to display transaction safety check results
     function displayTransactionSafetyResults(safetyResults) {
       const securityVerification = document.querySelector('.alert-warning');
       if (!securityVerification) return;
@@ -757,7 +850,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="col-md-6">
               <div class="card bg-dark text-light mb-2">
                 <div class="card-header py-1">Call Data Verification</div>
-                <div class="card-body py-2">
+                <div class="card-body py-2" style="height: 90px; overflow-y: auto;">
                   <ul class="mb-0 small">
                     <li>Recipient matches: <span class="${safetyResults.calldataVerification.recipientMatches ? 'text-success' : 'text-danger'}">${safetyResults.calldataVerification.recipientMatches ? 'Yes' : 'No'}</span></li>
                     <li>Value matches: <span class="${safetyResults.calldataVerification.valueMatches ? 'text-success' : 'text-danger'}">${safetyResults.calldataVerification.valueMatches ? 'Yes' : 'No'}</span></li>
@@ -770,12 +863,16 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="col-md-6">
               <div class="card bg-dark text-light mb-2">
                 <div class="card-header py-1">Recipient Risk Assessment</div>
-                <div class="card-body py-2">
-                  <ul class="mb-0 small">
-                    <li>Risk score: <span class="fw-bold text-${safetyResults.recipientRisk.riskCategory === 'Low' ? 'success' : safetyResults.recipientRisk.riskCategory === 'Medium' ? 'warning' : 'danger'}">${safetyResults.recipientRisk.riskScore}/100 (${safetyResults.recipientRisk.riskCategory})</span></li>
-                    <li>New address: <span class="${!safetyResults.recipientRisk.isNewAddress ? 'text-success' : 'text-warning'}">${safetyResults.recipientRisk.isNewAddress ? 'Yes' : 'No'}</span></li>
-                    <li>Is contract: <span class="${!safetyResults.recipientRisk.isContract ? 'text-success' : 'text-warning'}">${safetyResults.recipientRisk.isContract ? 'Yes' : 'No'}</span></li>
-                  </ul>
+                <div class="card-body py-2" style="height: 90px; overflow-y: auto;">
+                  ${safetyResults.recipientRisk.riskIndicators && safetyResults.recipientRisk.riskIndicators.length > 0 ? 
+                    `<div class="mb-0 small">
+                      <p class="mb-1">Risk indicators: ${safetyResults.recipientRisk.riskIndicators.length}</p>
+                      <ul class="mb-0 text-warning">
+                        ${safetyResults.recipientRisk.riskIndicators.map(indicator => `<li>${indicator}</li>`).join('')}
+                      </ul>
+                    </div>` : 
+                    '<p class="mb-0 small">Risk indicators: 0</p>'
+                  }
                 </div>
               </div>
             </div>
@@ -785,7 +882,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="col-md-6">
               <div class="card bg-dark text-light mb-2">
                 <div class="card-header py-1">Transaction Simulation</div>
-                <div class="card-body py-2">
+                <div class="card-body py-2" style="height: 90px; overflow-y: auto;">
                   <ul class="mb-0 small">
                     <li>Success: <span class="${safetyResults.simulationResults.success ? 'text-success' : 'text-danger'}">${safetyResults.simulationResults.success ? 'Yes' : 'No'}</span></li>
                     <li>Simulated: ${safetyResults.simulationResults.simulated ? 'Yes' : 'No (skipped)'}</li>
@@ -801,7 +898,7 @@ document.addEventListener('DOMContentLoaded', function() {
             <div class="col-md-6">
               <div class="card bg-dark text-light mb-2">
                 <div class="card-header py-1">Etherscan Data</div>
-                <div class="card-body py-2">
+                <div class="card-body py-2" style="height: 90px; overflow-y: auto;">
                   <ul class="mb-0 small">
                     ${safetyResults.etherscanData.isContract ? 
                       `<li>Contract: <span class="text-warning">${safetyResults.etherscanData.contractName || 'Unknown'}</span></li>
@@ -822,41 +919,6 @@ document.addEventListener('DOMContentLoaded', function() {
       `;
     }
 
-    // Add toggleAdvancedSafetyDetails to window for global access
-    window.toggleAdvancedSafetyDetails = function() {
-      const detailsDiv = document.getElementById('advancedSafetyDetails');
-      if (detailsDiv) {
-        detailsDiv.classList.toggle('d-none');
-      }
-    }
-
-    // Add the safety check to the review transaction button
-    if (document.getElementById('reviewTransactionBtn')) {
-      const originalReviewTransactionBtnClick = document.getElementById('reviewTransactionBtn').onclick;
-      
-      document.getElementById('reviewTransactionBtn').onclick = function() {
-        if (originalReviewTransactionBtnClick) {
-          originalReviewTransactionBtnClick.call(this);
-        }
-        
-        // Add a small delay to ensure the preview is shown
-        setTimeout(() => {
-          // Add "Check Transaction Safety" button to the preview
-          const previewButtons = document.querySelector('.d-flex.justify-content-between.mt-4');
-          if (previewButtons && !document.getElementById('safetyCheckBtn')) {
-            const safetyCheckBtn = document.createElement('button');
-            safetyCheckBtn.type = 'button';
-            safetyCheckBtn.id = 'safetyCheckBtn';
-            safetyCheckBtn.className = 'btn btn-warning';
-            safetyCheckBtn.innerHTML = '<i class="fas fa-shield-alt me-2"></i> Check Transaction Safety';
-            safetyCheckBtn.onclick = checkTransactionSafety;
-            
-            previewButtons.insertBefore(safetyCheckBtn, previewButtons.lastElementChild);
-          }
-        }, 500);
-      };
-    }
-    
     // Form submission handler
     sendTransactionForm.addEventListener('submit', function(event) {
       console.log('Form submit event triggered!');

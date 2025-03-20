@@ -675,16 +675,29 @@ router.post('/api/send-transaction', async (ctx) => {
 router.post('/api/transaction-safety-check', async (ctx) => {
     try {
         const { sender, recipient, amount, currency, message, calldata, displayedData, gasPaymentMethod, submissionMethod } = ctx.request.body;
+        console.log('Transaction safety check request:', {
+            sender: sender?.substring(0, 10) + '...',
+            recipient: recipient?.substring(0, 10) + '...',
+            amount,
+            currency,
+            messageLength: message?.length || 0,
+            calldataLength: calldata?.length || 0,
+            displayedData
+        });
         if (!recipient || !calldata) {
             ctx.status = 400;
             ctx.body = { error: 'Recipient and calldata are required' };
             return;
         }
         // 1. Call Data Verification - Check if displayed data matches calldata
+        console.log('Starting calldata verification...');
         const calldataVerification = verifyCalldata(calldata, displayedData);
+        console.log('Calldata verification result:', calldataVerification);
         // 2. Recipient Risk Assessment - Check for suspicious activity
+        console.log('Starting recipient risk assessment...');
         const recipientRisk = await checkRecipientRisk(recipient);
         // 3. Transaction Simulation - Simulate the transaction
+        console.log('Starting transaction simulation...');
         const simulationResults = await simulateTransaction({
             sender,
             recipient,
@@ -692,8 +705,10 @@ router.post('/api/transaction-safety-check', async (ctx) => {
             value: currency === 'ETH' && amount ? BigInt(Math.floor(parseFloat(amount) * 1e18)).toString() : '0'
         });
         // 4. Etherscan Data Check - Check for suspicious activity
+        console.log('Starting Etherscan data check...');
         const etherscanData = await checkEtherscanData(recipient);
         // 5. AI Analysis - Analyze all collected data
+        console.log('Starting AI analysis...');
         const aiAnalysis = await aiTransactionAnalysis({
             calldataVerification,
             recipientRisk,
