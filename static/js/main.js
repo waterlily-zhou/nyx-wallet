@@ -1046,4 +1046,30 @@ document.addEventListener('DOMContentLoaded', function() {
   } else {
     console.error('sendTransactionForm not found in the DOM');
   }
+
+  // Function to get the correct explorer URL based on the chain
+  function getExplorerUrl(txHash) {
+    // Get chain information from the page if available
+    const networkText = document.querySelector('.alert-info strong:contains("Network:")').next().text().trim();
+    
+    // Check which chain we're on
+    if (networkText.includes('Base')) {
+      // Base Mainnet
+      return `https://basescan.org/tx/${txHash}`;
+    } else if (networkText.includes('Base Goerli')) {
+      // Base Goerli
+      return `https://goerli.basescan.org/tx/${txHash}`;
+    } else {
+      // Default to Sepolia
+      return `https://sepolia.etherscan.io/tx/${txHash}`;
+    }
+  }
+
+  // Update the function that sets the transaction hash
+  function updateTransactionHash(hash) {
+    $('#transactionHash').val(hash);
+    $('#viewOnEtherscan').attr('href', getExplorerUrl(hash));
+    $('#transactionLoading').hide();
+    $('#transactionResult').show();
+  }
 }); 

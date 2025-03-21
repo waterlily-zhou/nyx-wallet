@@ -1,6 +1,6 @@
 import { Hex } from 'viem';
 import dotenv from 'dotenv';
-import { validateEnvironment, createOwnerAccount, createPublicClientForSepolia, createPimlicoClientInstance, createSafeSmartAccount } from "./utils/client-setup.js";
+import { validateEnvironment, createOwnerAccount, createPublicClient, createPimlicoClientInstance, createSafeSmartAccount, getActiveChain } from "./utils/client-setup.js";
 import { sendTransactionWithHybridGasPayment } from './usdc-gas-payment.js';
 import fs from 'fs';
 import path from 'path';
@@ -61,7 +61,12 @@ async function initializeWallet() {
   try {
     const { apiKey, privateKey } = validateEnvironment();
     const owner = createOwnerAccount(privateKey);
-    const publicClient = createPublicClientForSepolia();
+    
+    // Use the chain-agnostic public client instead of Sepolia-specific client
+    const publicClient = createPublicClient();
+    const activeChain = getActiveChain();
+    console.log(`🌐 Using ${activeChain.chain.name} chain (${activeChain.chain.id})`);
+    
     const pimlicoClient = createPimlicoClientInstance(apiKey);
     
     console.log('🔨 Loading Safe smart account...');
