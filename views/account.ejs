@@ -1,0 +1,235 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Nyx Wallet - Account Settings</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><text y=%22.9em%22 font-size=%2290%22>🌓</text></svg>">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css">
+  <style>
+    body {
+      background-color: #13151f !important;
+      font-family: Arial, sans-serif;
+      color: #e4e7f4;
+      min-height: 100vh;
+    }
+    .container {
+      padding-top: 30px;
+      padding-bottom: 30px;
+    }
+    .header {
+      background-color: #6246ea;
+      background-image: linear-gradient(135deg, #6246ea, #8878ff);
+      color: white;
+      padding: 15px 20px;
+      border-top-left-radius: 12px;
+      border-top-right-radius: 12px;
+    }
+    .card {
+      border: none;
+      border-radius: 12px;
+      box-shadow: 0 4px 8px rgba(0,0,0,0.2);
+      margin-bottom: 20px;
+      background-color: #1c1f2e;
+      color: #e4e7f4;
+      overflow: hidden;
+    }
+    .card-body {
+      padding: 20px;
+    }
+    .btn-primary {
+      background-color: #6246ea;
+      border-color: #6246ea;
+    }
+    .btn-primary:hover {
+      background-color: #5538d2;
+      border-color: #5538d2;
+    }
+    .btn-outline-primary {
+      color: #6246ea;
+      border-color: #6246ea;
+    }
+    .btn-outline-primary:hover {
+      background-color: #6246ea;
+      color: white;
+    }
+    .section-title {
+      margin-bottom: 20px;
+      border-bottom: 1px solid #343b50;
+      padding-bottom: 10px;
+    }
+    .action-card {
+      background-color: #252a3d;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 15px;
+      border: 1px solid #3a4057;
+      cursor: pointer;
+      transition: all 0.2s ease;
+    }
+    .action-card:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 6px 12px rgba(0,0,0,0.2);
+      border-color: #6246ea;
+    }
+    .action-icon {
+      font-size: 2rem;
+      margin-right: 15px;
+      color: #6246ea;
+    }
+    #loading {
+      display: none;
+      text-align: center;
+      margin-top: 20px;
+    }
+    #statusMessage {
+      display: none;
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 5px;
+    }
+    .status-success {
+      color: #28a745;
+      background-color: rgba(40, 167, 69, 0.1);
+    }
+    .status-error {
+      color: #f44336;
+      background-color: rgba(244, 67, 54, 0.1);
+    }
+    .wallet-info {
+      background-color: #252a3d;
+      border-radius: 8px;
+      padding: 15px;
+      margin-bottom: 20px;
+    }
+    .wallet-address {
+      word-break: break-all;
+      font-family: monospace;
+      background-color: #1c1f2e;
+      padding: 10px;
+      border-radius: 4px;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="row">
+      <div class="col-md-4 mb-4">
+        <!-- Sidebar -->
+        <div class="card">
+          <div class="header">
+            <h3>🌓 Nyx Wallet</h3>
+            <p class="mb-0">Account Settings</p>
+          </div>
+          <div class="card-body">
+            <div class="d-grid gap-2 mb-4">
+              <a href="/" class="btn btn-outline-primary">
+                <i class="fas fa-home me-2"></i> Dashboard
+              </a>
+              <a href="/account" class="btn btn-primary">
+                <i class="fas fa-user-cog me-2"></i> Account
+              </a>
+              <button id="logoutBtn" class="btn btn-outline-danger mt-2">
+                <i class="fas fa-sign-out-alt me-2"></i> Logout
+              </button>
+            </div>
+            
+            <div class="wallet-info">
+              <h5>Your Wallet</h5>
+              <% if (wallet && wallet.address) { %>
+                <p class="mb-1"><strong>Address:</strong></p>
+                <p class="wallet-address"><%= wallet.address %></p>
+                <p class="mb-0"><strong>Type:</strong> <%= wallet.type || "Smart Account" %></p>
+              <% } else { %>
+                <p class="text-warning">Wallet not found</p>
+              <% } %>
+            </div>
+          </div>
+        </div>
+      </div>
+      
+      <div class="col-md-8">
+        <!-- Main Content -->
+        <div class="card">
+          <div class="header">
+            <h3>Account Settings</h3>
+          </div>
+          <div class="card-body">
+            <h4 class="section-title">Security Options</h4>
+            
+            <!-- Register Biometrics -->
+            <div class="action-card" id="registerBiometricsBtn">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-fingerprint action-icon"></i>
+                <div>
+                  <h5>Register Biometrics</h5>
+                  <p class="mb-0">Add fingerprint or face recognition to secure your wallet</p>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Export Private Key (Disabled for security) -->
+            <div class="action-card" style="opacity: 0.6; cursor: not-allowed;">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-key action-icon"></i>
+                <div>
+                  <h5>Export Private Key</h5>
+                  <p class="mb-0">Disabled for security reasons</p>
+                </div>
+              </div>
+            </div>
+            
+            <h4 class="section-title mt-4">Account Preferences</h4>
+            
+            <!-- Network Settings -->
+            <div class="action-card">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-network-wired action-icon"></i>
+                <div>
+                  <h5>Network Settings</h5>
+                  <p class="mb-0">Change blockchain network (.env setting)</p>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Logout Option -->
+            <div class="action-card" id="logoutCardBtn">
+              <div class="d-flex align-items-center">
+                <i class="fas fa-sign-out-alt action-icon" style="color: #dc3545;"></i>
+                <div>
+                  <h5>Logout</h5>
+                  <p class="mb-0">Sign out from your wallet session</p>
+                </div>
+              </div>
+            </div>
+            
+            <!-- Loading Indicator -->
+            <div id="biometricLoader" class="d-none mt-4">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-2">Processing your request...</p>
+            </div>
+            
+            <!-- Status Message -->
+            <div id="biometricStatus" class="d-none mt-3 p-3 rounded"></div>
+            
+            <!-- Old elements (kept for backward compatibility) -->
+            <div id="loading" style="display: none;">
+              <div class="spinner-border text-primary" role="status">
+                <span class="visually-hidden">Loading...</span>
+              </div>
+              <p class="mt-2">Processing your request...</p>
+            </div>
+            
+            <!-- Status Message -->
+            <div id="statusMessage" style="display: none;"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+  
+  <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+  <script src="/static/js/account.js"></script>
+</body>
+</html> 

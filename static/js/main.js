@@ -1053,7 +1053,10 @@ document.addEventListener('DOMContentLoaded', function() {
     const networkText = document.querySelector('.alert-info strong:contains("Network:")').next().text().trim();
     
     // Check which chain we're on
-    if (networkText.includes('Base')) {
+    if (networkText.includes('Base Sepolia')) {
+      // Base Sepolia
+      return `https://sepolia.basescan.org/tx/${txHash}`;
+    } else if (networkText.includes('Base')) {
       // Base Mainnet
       return `https://basescan.org/tx/${txHash}`;
     } else if (networkText.includes('Base Goerli')) {

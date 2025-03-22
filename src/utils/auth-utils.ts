@@ -9,11 +9,17 @@ import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import crypto from 'crypto';
+import fs from 'fs';
+import path from 'path';
 
 // WebAuthn settings
 export const rpName = 'Nyx Wallet';
 export const rpID = process.env.RP_ID || 'localhost';
 export const origin = process.env.ORIGIN || `http://${rpID}:3000`;
+
+// Storage file path
+const DATA_DIR = path.join(process.cwd(), 'data');
+const USERS_FILE = path.join(DATA_DIR, 'users.json');
 
 // Types
 export interface UserAccount {
@@ -26,8 +32,51 @@ export interface UserAccount {
   createdAt: Date;
 }
 
-// In-memory user accounts (should be replaced with a database in production)
-export const userAccounts: UserAccount[] = [];
+// In-memory user accounts loaded from persistent storage
+export let userAccounts: UserAccount[] = [];
+
+// Initialize storage on startup
+export function initializeStorage(): void {
+  // Create data directory if it doesn't exist
+  if (!fs.existsSync(DATA_DIR)) {
+    try {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+      console.log(`Created data directory: ${DATA_DIR}`);
+    } catch (error) {
+      console.error('Failed to create data directory:', error);
+    }
+  }
+  
+  // Load user accounts from storage
+  loadUserData();
+  
+  // Log the result
+  console.log(`Loaded ${userAccounts.length} user accounts from storage`);
+}
+
+// Load user data from storage
+function loadUserData(): void {
+  try {
+    // Check if the users file exists
+    if (fs.existsSync(USERS_FILE)) {
+      // Read and parse the user data
+      const data = fs.readFileSync(USERS_FILE, 'utf8');
+      const parsedData = JSON.parse(data);
+      
+      // Convert ISO date strings back to Date objects
+      userAccounts = parsedData.map((user: any) => ({
+        ...user,
+        createdAt: new Date(user.createdAt)
+      }));
+    } else {
+      console.log('No user data file found, starting with empty user accounts');
+      userAccounts = [];
+    }
+  } catch (error) {
+    console.error('Error loading user data:', error);
+    userAccounts = [];
+  }
+}
 
 // Generate a random private key
 export function generateRandomPrivateKey(): Hex {
@@ -127,20 +176,47 @@ export function createUser(
   };
   
   userAccounts.push(user);
+  saveUserData(); // Save the updated user list
   return user;
 }
 
-// Update user credentials (for WebAuthn)
-export function updateUserCredentials(userId: string, credential: any): UserAccount | undefined {
+// Save user data to storage
+function saveUserData(): void {
+  try {
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    
+    // Write user data to file
+    const data = JSON.stringify(userAccounts, null, 2);
+    fs.writeFileSync(USERS_FILE, data, 'utf8');
+    console.log(`Saved ${userAccounts.length} users to storage`);
+  } catch (error) {
+    console.error('Error saving user data:', error);
+  }
+}
+
+// Update user credentials (for biometric registration)
+export function updateUserCredentials(userId: string, credential: any): void {
   const user = findUserById(userId);
-  if (!user) return undefined;
   
+  if (!user) {
+    throw new Error(`User with ID ${userId} not found`);
+  }
+  
+  // Initialize credentials array if it doesn't exist
   if (!user.credentials) {
     user.credentials = [];
   }
   
+  // Add new credential
   user.credentials.push(credential);
-  return user;
+  
+  // Save user data
+  saveUserData();
+  
+  console.log(`Updated credentials for user ${userId}. Total credentials: ${user.credentials.length}`);
 }
 
 // Sign transaction with biometrics

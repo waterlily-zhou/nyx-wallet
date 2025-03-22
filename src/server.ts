@@ -21,6 +21,7 @@ import { sendTransaction, GasPaymentMethod } from './usdc-gas-payment.js';
 import { createSmartAccountClient } from 'permissionless';
 import { verifyCalldata, checkRecipientRisk, simulateTransaction, checkEtherscanData, aiTransactionAnalysis } from './utils/transaction-safety.js';
 import authRoutes from './routes/auth-routes.js';
+import { initializeStorage } from './utils/auth-utils.js';
 
 // Get the current directory
 const __filename = fileURLToPath(import.meta.url);
@@ -140,6 +141,9 @@ const router = new Router();
 // Set application name
 const APP_NAME = 'Nyx Wallet';
 console.log(`Initializing ${APP_NAME}...`);
+
+// Initialize persistent storage for user accounts
+initializeStorage();
 
 // Session configuration
 app.keys = [process.env.SESSION_SECRET || 'nyx-wallet-secret-key'];
@@ -330,11 +334,39 @@ router.get('/login', async (ctx) => {
     });
   } catch (error) {
     console.error('Login render error:', error);
-    await ctx.render('error', { 
-      layout: 'test-layout',
-      title: `${APP_NAME} - Error`,
-      error 
+    ctx.status = 500;
+    ctx.body = 'Error rendering login page';
+  }
+});
+
+// Add account settings page
+router.get('/account', async (ctx) => {
+  try {
+    // Check if user is logged in
+    if (!ctx.session.userId) {
+      return ctx.redirect('/login');
+    }
+    
+    // Get user information
+    const { findUserById } = await import('./utils/auth-utils.js');
+    const user = findUserById(ctx.session.userId);
+    if (!user || !user.walletAddress) {
+      return ctx.redirect('/login');
+    }
+    
+    // Render account page with wallet info
+    await ctx.render('account', {
+      title: `${APP_NAME} - Account Settings`,
+      wallet: {
+        address: user.walletAddress,
+        type: user.authType === 'direct' ? 'Smart Account' : 
+              user.authType === 'biometric' ? 'Biometric Account' : 'Social Account'
+      }
     });
+  } catch (error) {
+    console.error('Account page render error:', error);
+    ctx.status = 500;
+    ctx.body = 'Error rendering account page';
   }
 });
 
@@ -444,6 +476,8 @@ router.post('/api/transaction/send', async (ctx) => {
       ? 'https://goerli.basescan.org/tx/' 
       : activeChain.chain.id === 8453 
       ? 'https://basescan.org/tx/'
+      : activeChain.chain.id === 84532
+      ? 'https://sepolia.basescan.org/tx/'
       : 'https://sepolia.etherscan.io/tx/';
       
     ctx.body = { 

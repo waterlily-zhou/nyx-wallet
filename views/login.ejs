@@ -121,6 +121,19 @@
       border-radius: 5px;
       background-color: rgba(244, 67, 54, 0.1);
     }
+    .loading {
+      display: none;
+      text-align: center;
+      margin-top: 20px;
+    }
+    .status-message {
+      display: none;
+      color: #4CAF50;
+      margin-top: 15px;
+      padding: 10px;
+      border-radius: 5px;
+      background-color: rgba(76, 175, 80, 0.1);
+    }
   </style>
 </head>
 <body>
@@ -155,8 +168,21 @@
           <i class="fas fa-fingerprint logo-icon fingerprint-icon"></i>
         </div>
         <div>
-          <h4>Biometric Authentication</h4>
-          <p class="mb-0">Use fingerprint or face recognition</p>
+          <h4>Login with Biometrics</h4>
+          <p class="mb-0">Use your fingerprint or face recognition to access your wallet</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Additional Login Option -->
+    <div class="auth-option" id="login-option">
+      <div class="d-flex align-items-center">
+        <div class="me-3">
+          <i class="fas fa-sign-in-alt logo-icon"></i>
+        </div>
+        <div>
+          <h4>Login to Existing Wallet</h4>
+          <p class="mb-0">Access your wallet using your registered biometrics</p>
         </div>
       </div>
     </div>
@@ -174,15 +200,13 @@
     </div>
 
     <!-- Loading Indicator -->
-    <div id="loading">
-      <div class="spinner-border text-primary" role="status">
-        <span class="visually-hidden">Loading...</span>
-      </div>
-      <p class="mt-2">Processing your request...</p>
+    <div class="loading" id="loading">
+      <div class="spinner"></div>
     </div>
 
     <!-- Error Message -->
-    <div id="error-message"></div>
+    <div class="error-message" id="error-message"></div>
+    <div class="status-message" id="status-message"></div>
 
   </div>
 

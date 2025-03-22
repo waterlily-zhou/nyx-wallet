@@ -55,18 +55,57 @@ router.get('/biometric/check', async (ctx: any) => {
     user.credentials?.some(cred => cred.deviceId === deviceId)
   );
   
+  // Log current user accounts and device ID for debugging
+  console.log(`Checking biometric registration for device: ${deviceId}`);
+  console.log(`User accounts count: ${userAccounts.length}`);
+  console.log(`Registered user found: ${!!registeredUser}`);
+  
+  if (registeredUser) {
+    console.log(`Found registered user: ${registeredUser.id}, wallet address: ${registeredUser.walletAddress}`);
+  }
+  
+  // Important: If this is a WebAuthn capable device but no registration found,
+  // we should allow the user to register biometrics for an existing wallet
+  const isWebAuthnDevice = ctx.request.headers['sec-webauthn-available'] === 'true' || 
+                          ctx.request.headers['webauthn-support'] === 'true';
+  
   ctx.body = {
     registered: !!registeredUser,
-    deviceId
+    deviceId,
+    isWebAuthnDevice,
+    // If there's a registered user, include the wallet address
+    walletAddress: registeredUser ? registeredUser.walletAddress : null
   };
 });
 
 // Get WebAuthn registration options
 router.post('/biometric/register/options', async (ctx: any) => {
   try {
-    // Create temporary user ID if not in session
-    if (!ctx.session.tempUserId) {
-      ctx.session.tempUserId = crypto.randomUUID();
+    const { forExistingAccount } = ctx.request.body || {};
+    
+    // If this is for an existing account, check if the user is logged in
+    if (forExistingAccount) {
+      if (!ctx.session.userId) {
+        ctx.status = 401;
+        ctx.body = { error: 'Authentication required' };
+        return;
+      }
+      
+      const user = findUserById(ctx.session.userId);
+      if (!user) {
+        ctx.status = 401;
+        ctx.body = { error: 'User not found' };
+        return;
+      }
+      
+      // Use the existing user ID
+      ctx.session.tempUserId = user.id;
+      console.log(`Using existing user ID for biometric registration: ${user.id}`);
+    } else {
+      // Create temporary user ID if not in session (for new accounts)
+      if (!ctx.session.tempUserId) {
+        ctx.session.tempUserId = crypto.randomUUID();
+      }
     }
     
     const userId = ctx.session.tempUserId;
@@ -99,6 +138,7 @@ router.post('/biometric/register/options', async (ctx: any) => {
     
     // Store challenge in session
     ctx.session.challenge = options.challenge;
+    ctx.session.forExistingAccount = forExistingAccount;
     
     ctx.body = options;
   } catch (error) {
@@ -115,6 +155,7 @@ router.post('/biometric/register/options', async (ctx: any) => {
 router.post('/biometric/register/complete', async (ctx: any) => {
   try {
     const { body } = ctx.request;
+    const forExistingAccount = ctx.session.forExistingAccount || body.forExistingAccount;
     
     // Verify tempUserId exists
     if (!ctx.session.tempUserId) {
@@ -132,6 +173,13 @@ router.post('/biometric/register/complete', async (ctx: any) => {
     
     const expectedChallenge = ctx.session.challenge;
     const userId = ctx.session.tempUserId;
+    
+    // Add client extension results if missing (WebAuthn requires this)
+    if (!body.clientExtensionResults) {
+      body.clientExtensionResults = {};
+    }
+    
+    console.log('Processing registration verification for user:', userId);
     
     // Verify registration response
     const verification = await verifyRegistrationResponse({
@@ -155,40 +203,78 @@ router.post('/biometric/register/complete', async (ctx: any) => {
       return;
     }
     
-    // Create credential object - adjust property access based on updated WebAuthn library
+    // Create credential object - safely handle the registrationInfo properties
     const credential = {
       id: body.id,
-      // Access credentialPublicKey and counter from the new structure
-      publicKey: registrationInfo.credentialPublicKey || registrationInfo.credential?.publicKey,
-      counter: registrationInfo.counter || 0,
+      publicKey: registrationInfo.credentialPublicKey 
+        ? Buffer.from(registrationInfo.credentialPublicKey).toString('base64')
+        : registrationInfo.credential && registrationInfo.credential.publicKey 
+          ? registrationInfo.credential.publicKey
+          : null,
+      counter: typeof registrationInfo.counter === 'number' ? registrationInfo.counter : 0,
       deviceId: ctx.cookies.get('deviceId')
     };
     
-    // Create smart account from biometric credentials
-    const { address, privateKey } = await createSmartAccountFromCredential(userId, 'biometric');
-    
-    // Create new user or update existing user
-    let user = findUserById(userId);
-    if (!user) {
-      user = createUser(`user_${userId.slice(0, 6)}`, 'biometric', address, privateKey);
-      user.id = userId; // Use tempUserId as the actual userId
+    // Check if credential has a valid publicKey
+    if (!credential.publicKey) {
+      console.error('Failed to extract public key from registration info:', registrationInfo);
+      ctx.status = 400;
+      ctx.body = { error: 'Invalid credential data' };
+      return;
     }
     
-    // Add credential to user
-    updateUserCredentials(userId, credential);
+    let user = findUserById(userId);
     
-    // Set session
-    ctx.session.userId = user.id;
+    // For existing accounts, just add the credential to the user
+    if (forExistingAccount && user) {
+      console.log(`Adding biometric credential to existing user: ${userId}`);
+      updateUserCredentials(userId, credential);
+      
+      ctx.body = {
+        success: true,
+        message: 'Biometric authentication added to your account',
+        wallet: {
+          address: user.walletAddress,
+          type: 'smart-account'
+        }
+      };
+    } else {
+      // For new accounts, create a new wallet
+      try {
+        console.log('Creating smart account for new user with biometrics');
+        const { address, privateKey } = await createSmartAccountFromCredential(userId, 'biometric');
+        console.log(`Smart account created: ${address}`);
+        
+        // Create new user or update existing user
+        if (!user) {
+          user = createUser(`user_${userId.slice(0, 6)}`, 'biometric', address, privateKey);
+          user.id = userId; // Use tempUserId as the actual userId
+        }
+        
+        // Add credential to user
+        updateUserCredentials(userId, credential);
+        
+        // Set session
+        ctx.session.userId = user.id;
+        
+        ctx.body = {
+          success: true,
+          wallet: {
+            address,
+            type: 'smart-account'
+          }
+        };
+      } catch (error) {
+        console.error('Error creating smart account:', error);
+        throw error;
+      }
+    }
+    
+    // Clean up session
     delete ctx.session.tempUserId;
     delete ctx.session.challenge;
+    delete ctx.session.forExistingAccount;
     
-    ctx.body = {
-      success: true,
-      wallet: {
-        address,
-        type: 'smart-account'
-      }
-    };
   } catch (error) {
     console.error('Error verifying registration:', error);
     ctx.status = 500;
@@ -234,7 +320,8 @@ router.post('/biometric/authenticate/options', async (ctx: any) => {
     const options = await generateAuthenticationOptions({
       rpID,
       allowCredentials: credentials.map(cred => ({
-        id: cred.id, // Pass the ID as is - the library will handle conversion
+        id: cred.id,
+        transports: ['internal'],
         type: 'public-key'
       })),
       userVerification: 'preferred'
@@ -274,6 +361,11 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
       return;
     }
     
+    // Add client extension results if missing (WebAuthn requires this)
+    if (!body.clientExtensionResults) {
+      body.clientExtensionResults = {};
+    }
+    
     const expectedChallenge = ctx.session.challenge;
     const userId = ctx.session.expectedUserId;
     
@@ -293,47 +385,130 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
       return;
     }
     
-    // Verify authentication response
-    const verification = await verifyAuthenticationResponse({
+    console.log('Processing authentication for user:', userId);
+    console.log('Credential found:', credential.id);
+    console.log('Counter value:', credential.counter);
+    
+    // Ensure credential has necessary properties and initialize if missing
+    if (credential.publicKey === undefined || credential.publicKey === null) {
+      ctx.status = 400;
+      ctx.body = { error: 'Credential is missing public key' };
+      return;
+    }
+    
+    // Ensure counter exists and is a number
+    if (credential.counter === undefined || credential.counter === null) {
+      // Initialize counter if it doesn't exist
+      credential.counter = 0;
+      // Save this change to ensure it persists
+      updateUserCredentials(userId, credential);
+    }
+    
+    // Convert string publicKey to Buffer or Uint8Array if needed
+    let credentialPublicKey;
+    if (typeof credential.publicKey === 'string') {
+      try {
+        credentialPublicKey = Buffer.from(credential.publicKey, 'base64');
+      } catch (e) {
+        console.error('Error converting publicKey from base64:', e);
+        ctx.status = 400;
+        ctx.body = { error: 'Invalid credential format' };
+        return;
+      }
+    } else {
+      credentialPublicKey = credential.publicKey;
+    }
+    
+    // Prepare the verification data according to SimpleWebAuthn's expected format
+    // The key difference is using "credential" instead of "authenticator"
+    const verificationOptions = {
       response: body,
       expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
       requireUserVerification: true,
-      authenticator: {
-        credentialID: Buffer.from(credential.id, 'base64'),
-        credentialPublicKey: credential.publicKey,
-        counter: credential.counter
+      credential: {
+        id: credential.id,
+        publicKey: credentialPublicKey,
+        counter: credential.counter,
+        // Optional but good to include if available
+        transports: ['internal']
       }
-    });
+    };
     
-    if (!verification.verified) {
+    console.log('Verification options:', JSON.stringify({
+      ...verificationOptions,
+      credential: {
+        ...verificationOptions.credential,
+        publicKey: '<omitted for logging>'
+      }
+    }, null, 2));
+    
+    // Wrap the verification in a more robust try/catch
+    let verification;
+    try {
+      // Verify authentication response
+      verification = await verifyAuthenticationResponse(verificationOptions);
+      
+      if (!verification.verified) {
+        ctx.status = 400;
+        ctx.body = { error: 'Verification failed' };
+        return;
+      }
+      
+      // Update the counter after successful verification if authenticationInfo is available
+      if (verification.authenticationInfo && typeof verification.authenticationInfo.newCounter === 'number') {
+        credential.counter = verification.authenticationInfo.newCounter;
+        // Make sure to save the updated counter
+        updateUserCredentials(userId, credential);
+      }
+      
+      // Set authenticated session
+      ctx.session.userId = userId;
+      ctx.session.authenticated = true;
+      
+      ctx.body = {
+        success: true,
+        user: {
+          id: user.id,
+          walletAddress: user.walletAddress
+        }
+      };
+    } catch (error: any) {
+      console.error('WebAuthn verification error:', error);
+      
+      // Handle specific counter error that occurs after logout
+      if (error.message && error.message.includes("Cannot read properties of undefined (reading 'counter')")) {
+        ctx.status = 401;
+        ctx.body = { 
+          error: 'Session expired or invalid. Please try again.',
+          code: 'SESSION_EXPIRED'
+        };
+        
+        // Clear the challenge and expected user ID to force a fresh start
+        delete ctx.session.challenge;
+        delete ctx.session.expectedUserId;
+        return;
+      }
+      
+      // General error response
       ctx.status = 400;
-      ctx.body = { error: 'Verification failed' };
+      ctx.body = { 
+        error: 'Authentication verification failed', 
+        details: error.message 
+      };
       return;
     }
     
-    // Update credential counter
-    credential.counter = verification.authenticationInfo.newCounter;
-    
-    // Set session
-    ctx.session.userId = user.id;
+    // Clean up session variables used for the authentication process
     delete ctx.session.challenge;
     delete ctx.session.expectedUserId;
-    
-    ctx.body = {
-      success: true,
-      wallet: {
-        address: user.walletAddress,
-        type: 'smart-account'
-      }
-    };
-  } catch (error) {
-    console.error('Error verifying authentication:', error);
+  } catch (error: any) {
+    console.error('Error authenticating with biometrics:', error);
     ctx.status = 500;
     ctx.body = { 
-      error: 'Failed to complete authentication',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      error: 'Failed to authenticate with biometrics',
+      details: error.message
     };
   }
 });
@@ -388,7 +563,7 @@ router.post('/biometric/transaction/options', requireAuth, async (ctx) => {
 // Verify transaction signed with biometrics
 router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
   try {
-    const { id, rawId, response, transactionHash, type } = ctx.request.body as any;
+    const { id, rawId, response, transactionHash, type, clientExtensionResults = {} } = ctx.request.body as any;
     
     // Verify challenge exists
     if (!ctx.session.transactionChallenge) {
@@ -408,16 +583,29 @@ router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
       return;
     }
     
-    // Verify authentication response
+    // Ensure counter exists and is a number
+    if (credential.counter === undefined || credential.counter === null) {
+      credential.counter = 0;
+    }
+    
+    // Convert credential.publicKey to correct format if needed
+    let publicKey = credential.publicKey;
+    if (typeof publicKey === 'string') {
+      publicKey = Buffer.from(publicKey, 'base64');
+    }
+    
+    // Verify authentication response using the correct structure
     const verification = await verifyAuthenticationResponse({
-      response: { id, rawId, response, type },
+      response: { id, rawId, response, type, clientExtensionResults },
       expectedChallenge,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      authenticator: {
-        credentialID: Buffer.from(credential.id, 'base64'),
-        credentialPublicKey: credential.publicKey,
-        counter: credential.counter
+      requireUserVerification: true,
+      credential: {
+        id: credential.id,
+        publicKey: publicKey,
+        counter: credential.counter,
+        transports: ['internal']
       }
     });
     
@@ -428,7 +616,11 @@ router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
     }
     
     // Update credential counter
-    credential.counter = verification.authenticationInfo.newCounter;
+    if (verification.authenticationInfo && verification.authenticationInfo.newCounter) {
+      credential.counter = verification.authenticationInfo.newCounter;
+      // Make sure to persist the updated counter
+      updateUserCredentials(user.id, credential);
+    }
     
     // Call function to sign transaction with user's key
     const signResult = await signTransactionWithBiometrics(user.id, transactionHash);
@@ -440,12 +632,12 @@ router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
       success: true,
       signature: signResult.signature
     };
-  } catch (error) {
+  } catch (error: any) {
     console.error('Error verifying transaction signature:', error);
     ctx.status = 500;
     ctx.body = { 
       error: 'Failed to verify transaction signature',
-      details: error instanceof Error ? error.message : 'Unknown error'
+      details: error.message
     };
   }
 });
@@ -485,8 +677,45 @@ router.get('/user', requireAuth, async (ctx) => {
 
 // Logout
 router.post('/logout', async (ctx) => {
-  ctx.session = null;
-  ctx.body = { success: true };
+  try {
+    // Clear session data
+    if (ctx.session) {
+      Object.keys(ctx.session).forEach(key => {
+        delete ctx.session[key];
+      });
+    }
+    
+    // Clear cookies that might be used for authentication
+    // Note: This doesn't completely clear deviceId as we might want to keep device association
+    // But we set a flag in the cookie to indicate logout occurred
+    const deviceId = ctx.cookies.get('deviceId');
+    if (deviceId) {
+      // Re-set the deviceId cookie with updated metadata indicating logout
+      ctx.cookies.set('deviceId', deviceId, {
+        httpOnly: true,
+        maxAge: 365 * 24 * 60 * 60 * 1000, // Keep the 1 year expiry
+        overwrite: true
+      });
+    }
+    
+    // Optionally clear other auth-related cookies if you have them
+    // ctx.cookies.set('other_auth_cookie', null); 
+    
+    console.log('User logged out successfully');
+    
+    ctx.body = { 
+      success: true,
+      message: 'Logged out successfully'
+    };
+  } catch (error) {
+    console.error('Logout error:', error);
+    ctx.status = 500;
+    ctx.body = { 
+      success: false,
+      error: 'Failed to complete logout',
+      details: error instanceof Error ? error.message : 'Unknown error'
+    };
+  }
 });
 
 export default router; 

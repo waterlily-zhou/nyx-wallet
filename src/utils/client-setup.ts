@@ -1,6 +1,6 @@
 import { http, type Hex, type Address } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { sepolia, base, baseGoerli } from 'viem/chains';
+import { sepolia, base, baseGoerli, baseSepolia } from 'viem/chains';
 import { createSmartAccountClient } from 'permissionless';
 import { toSafeSmartAccount } from 'permissionless/accounts';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
@@ -11,10 +11,10 @@ import * as dotenv from 'dotenv';
 dotenv.config();
 
 // Constants
-export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789';
+export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as Address;
 
 export type ChainConfig = {
-  chain: typeof sepolia | typeof base | typeof baseGoerli;
+  chain: typeof sepolia | typeof base | typeof baseGoerli | typeof baseSepolia;
   pimlicoChainName: string;
 };
 
@@ -30,6 +30,10 @@ export const CHAIN_CONFIG: Record<string, ChainConfig> = {
   baseGoerli: {
     chain: baseGoerli,
     pimlicoChainName: 'base-goerli'
+  },
+  baseSepolia: {
+    chain: baseSepolia,
+    pimlicoChainName: 'base-sepolia'
   }
 };
 
@@ -96,6 +100,8 @@ export function createPublicClient() {
     rpcUrl = process.env.BASE_RPC_URL || 'https://base-mainnet.g.alchemy.com/v2/YOUR_API_KEY';
   } else if (activeChain.chain.id === baseGoerli.id) {
     rpcUrl = process.env.BASE_GOERLI_RPC_URL || 'https://base-goerli.g.alchemy.com/v2/YOUR_API_KEY';
+  } else if (activeChain.chain.id === baseSepolia.id) {
+    rpcUrl = process.env.BASE_SEPOLIA_RPC_URL || 'https://base-sepolia.g.alchemy.com/v2/YOUR_API_KEY';
   } else {
     rpcUrl = process.env.SEPOLIA_RPC_URL || 'https://eth-sepolia.g.alchemy.com/v2/YOUR_API_KEY';
   }

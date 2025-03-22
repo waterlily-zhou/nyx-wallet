@@ -87,9 +87,16 @@
 </head>
 <body>
   <div class="container">
-    <div class="header">
-      <h1>Nyx Wallet</h1>
-      <p>Bringing Light to Crypto Transactions</p>
+    <div class="d-flex align-items-center justify-content-between mb-4">
+      <h1>🌓 Nyx Wallet</h1>
+      <div>
+        <a href="/account" class="btn btn-outline-primary me-2">
+          <i class="fas fa-user-cog"></i> Account Settings
+        </a>
+        <button id="refreshWalletBtn" class="btn btn-primary">
+          <i class="fas fa-sync-alt"></i> Refresh
+        </button>
+      </div>
     </div>
     
     <% if (typeof wallet !== 'undefined') { %>
