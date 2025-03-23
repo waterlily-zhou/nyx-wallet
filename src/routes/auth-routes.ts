@@ -404,24 +404,38 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
       updateUserCredentials(userId, credential);
     }
     
-    // Convert string publicKey to Buffer or Uint8Array if needed
-    let credentialPublicKey;
-    if (typeof credential.publicKey === 'string') {
-      try {
-        credentialPublicKey = Buffer.from(credential.publicKey, 'base64');
-      } catch (e) {
-        console.error('Error converting publicKey from base64:', e);
-        ctx.status = 400;
-        ctx.body = { error: 'Invalid credential format' };
-        return;
+    // The publicKey needs to be in the original binary format as provided by the authenticator
+    // When it's stored as a base64 string, convert back to Buffer carefully
+    let publicKey: Buffer;
+    try {
+      if (typeof credential.publicKey === 'string') {
+        // Convert base64 string back to Buffer
+        publicKey = Buffer.from(credential.publicKey, 'base64');
+      } else if (Buffer.isBuffer(credential.publicKey)) {
+        // Already a Buffer, use as is
+        publicKey = credential.publicKey;
+      } else if (credential.publicKey instanceof Uint8Array) {
+        // Uint8Array, convert to Buffer
+        publicKey = Buffer.from(credential.publicKey);
+      } else {
+        // If it's an object representation of bytes (e.g., {"0": 165, "1": 1, ...})
+        // Convert to Buffer appropriately
+        const bytesArray = Object.values(credential.publicKey as Record<string, number>);
+        if (Array.isArray(bytesArray) && bytesArray.length > 0) {
+          publicKey = Buffer.from(bytesArray);
+        } else {
+          throw new Error('Invalid credential public key format');
+        }
       }
-    } else {
-      credentialPublicKey = credential.publicKey;
+    } catch (error: any) {
+      console.error('Error processing credential public key:', error);
+      ctx.status = 400;
+      ctx.body = { error: 'Invalid credential format', details: error.message };
+      return;
     }
     
-    // Prepare the verification data according to SimpleWebAuthn's expected format
-    // The key difference is using "credential" instead of "authenticator"
-    const verificationOptions = {
+    // Log the verification input for debugging (but omit the actual key for security)
+    const verificationInput = {
       response: body,
       expectedChallenge,
       expectedOrigin: origin,
@@ -429,17 +443,15 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
       requireUserVerification: true,
       credential: {
         id: credential.id,
-        publicKey: credentialPublicKey,
-        counter: credential.counter,
-        // Optional but good to include if available
-        transports: ['internal']
+        publicKey,
+        counter: credential.counter
       }
     };
     
-    console.log('Verification options:', JSON.stringify({
-      ...verificationOptions,
+    console.log('Authentication data:', JSON.stringify({
+      ...verificationInput,
       credential: {
-        ...verificationOptions.credential,
+        ...verificationInput.credential,
         publicKey: '<omitted for logging>'
       }
     }, null, 2));
@@ -448,7 +460,7 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
     let verification;
     try {
       // Verify authentication response
-      verification = await verifyAuthenticationResponse(verificationOptions);
+      verification = await verifyAuthenticationResponse(verificationInput);
       
       if (!verification.verified) {
         ctx.status = 400;
@@ -488,6 +500,16 @@ router.post('/biometric/authenticate/complete', async (ctx: any) => {
         // Clear the challenge and expected user ID to force a fresh start
         delete ctx.session.challenge;
         delete ctx.session.expectedUserId;
+        return;
+      }
+      
+      // Handle CBOR decoding errors
+      if (error.message && (error.message.includes("No data") || error.message.includes("CBOR"))) {
+        ctx.status = 400;
+        ctx.body = { 
+          error: 'Authentication failed due to credential format issue. Try registering your device again.',
+          code: 'CREDENTIAL_FORMAT_ERROR'
+        };
         return;
       }
       
@@ -535,11 +557,12 @@ router.post('/biometric/transaction/options', requireAuth, async (ctx) => {
       return;
     }
     
-    // Generate authentication options
+    // Generate authentication options with properly formatted credential IDs
     const options = await generateAuthenticationOptions({
       rpID,
       allowCredentials: credentials.map(cred => ({
-        id: Buffer.from(cred.id, 'base64'),
+        id: cred.id, // Use the base64url ID string directly
+        transports: ['internal'] as any, // Type assertion to satisfy TS
         type: 'public-key'
       })),
       userVerification: 'required', // Require verification for transactions
@@ -588,50 +611,89 @@ router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
       credential.counter = 0;
     }
     
-    // Convert credential.publicKey to correct format if needed
-    let publicKey = credential.publicKey;
-    if (typeof publicKey === 'string') {
-      publicKey = Buffer.from(publicKey, 'base64');
-    }
-    
-    // Verify authentication response using the correct structure
-    const verification = await verifyAuthenticationResponse({
-      response: { id, rawId, response, type, clientExtensionResults },
-      expectedChallenge,
-      expectedOrigin: origin,
-      expectedRPID: rpID,
-      requireUserVerification: true,
-      credential: {
-        id: credential.id,
-        publicKey: publicKey,
-        counter: credential.counter,
-        transports: ['internal']
+    // The publicKey needs to be in the original binary format as provided by the authenticator
+    // When it's stored as a base64 string, convert back to Buffer carefully
+    let publicKey: Buffer;
+    try {
+      if (typeof credential.publicKey === 'string') {
+        // Convert base64 string back to Buffer
+        publicKey = Buffer.from(credential.publicKey, 'base64');
+      } else if (Buffer.isBuffer(credential.publicKey)) {
+        // Already a Buffer, use as is
+        publicKey = credential.publicKey;
+      } else if (credential.publicKey instanceof Uint8Array) {
+        // Uint8Array, convert to Buffer
+        publicKey = Buffer.from(credential.publicKey);
+      } else {
+        // If it's an object representation of bytes (e.g., {"0": 165, "1": 1, ...})
+        // Convert to Buffer appropriately
+        const bytesArray = Object.values(credential.publicKey as Record<string, number>);
+        if (Array.isArray(bytesArray) && bytesArray.length > 0) {
+          publicKey = Buffer.from(bytesArray);
+        } else {
+          throw new Error('Invalid credential public key format');
+        }
       }
-    });
-    
-    if (!verification.verified) {
+    } catch (error: any) {
+      console.error('Error processing credential public key:', error);
       ctx.status = 400;
-      ctx.body = { error: 'Verification failed' };
+      ctx.body = { error: 'Invalid credential format', details: error.message };
       return;
     }
     
-    // Update credential counter
-    if (verification.authenticationInfo && verification.authenticationInfo.newCounter) {
-      credential.counter = verification.authenticationInfo.newCounter;
-      // Make sure to persist the updated counter
-      updateUserCredentials(user.id, credential);
+    // Verify authentication response with the proper credential structure
+    try {
+      const verification = await verifyAuthenticationResponse({
+        response: { id, rawId, response, type, clientExtensionResults },
+        expectedChallenge,
+        expectedOrigin: origin,
+        expectedRPID: rpID,
+        requireUserVerification: true,
+        credential: {
+          id: credential.id,
+          publicKey,
+          counter: credential.counter
+        }
+      });
+      
+      if (!verification.verified) {
+        ctx.status = 400;
+        ctx.body = { error: 'Verification failed' };
+        return;
+      }
+      
+      // Update credential counter
+      if (verification.authenticationInfo && verification.authenticationInfo.newCounter) {
+        credential.counter = verification.authenticationInfo.newCounter;
+        // Make sure to persist the updated counter
+        updateUserCredentials(user.id, credential);
+      }
+      
+      // Call function to sign transaction with user's key
+      const signResult = await signTransactionWithBiometrics(user.id, transactionHash);
+      
+      // Clean up session
+      delete ctx.session.transactionChallenge;
+      
+      ctx.body = {
+        success: true,
+        signature: signResult.signature
+      };
+    } catch (error: any) {
+      console.error('WebAuthn verification error:', error);
+      
+      // Handle CBOR decoding errors
+      if (error.message && (error.message.includes("No data") || error.message.includes("CBOR"))) {
+        ctx.status = 400;
+        ctx.body = { 
+          error: 'Transaction verification failed due to credential format issue. Try registering your device again.',
+          code: 'CREDENTIAL_FORMAT_ERROR'
+        };
+        return;
+      }
+      
+      throw error; // Re-throw to be caught by the outer catch
     }
-    
-    // Call function to sign transaction with user's key
-    const signResult = await signTransactionWithBiometrics(user.id, transactionHash);
-    
-    // Clean up session
-    delete ctx.session.transactionChallenge;
-    
-    ctx.body = {
-      success: true,
-      signature: signResult.signature
-    };
   } catch (error: any) {
     console.error('Error verifying transaction signature:', error);
     ctx.status = 500;
