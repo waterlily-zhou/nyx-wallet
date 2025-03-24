@@ -76,23 +76,9 @@ document.addEventListener('DOMContentLoaded', function() {
       showLoading();
       showStatus('Creating your wallet...');
       try {
-        const response = await fetch('/api/wallet/create', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          credentials: 'same-origin'
-        });
-
-        if (!response.ok) {
-          const error = await response.json();
-          throw new Error(error.message || error.error || 'Failed to create wallet');
-        }
-
-        const data = await response.json();
-        showStatus('Wallet created successfully! Redirecting...');
-        // Redirect to the wallet page
-        window.location.href = '/';
+        // First create a new wallet, then we'll register biometrics
+        showStatus('Creating a new wallet first...');
+        await createWalletThenRegisterBiometrics();
       } catch (error) {
         console.error('Error creating wallet:', error);
         showError(error.message || 'Failed to create wallet');
@@ -190,7 +176,9 @@ document.addEventListener('DOMContentLoaded', function() {
   // First create a wallet, then register biometrics
   async function createWalletThenRegisterBiometrics() {
     try {
-      // First create a wallet
+      showStatus('Creating your biometric wallet...');
+      
+      // Create a wallet with biometric credentials
       const response = await fetch('/api/wallet/create', {
         method: 'POST',
         headers: {
@@ -205,11 +193,14 @@ document.addEventListener('DOMContentLoaded', function() {
       }
 
       const data = await response.json();
-      console.log("Wallet created successfully:", data);
+      console.log("Biometric wallet created successfully:", data);
       showStatus('Wallet created! Now registering your biometrics...');
       
-      // Then register biometrics for this wallet
+      // Register biometrics for this wallet
       await registerBiometricsForExistingWallet();
+      
+      // After successful registration, redirect to the main page
+      window.location.href = '/';
     } catch (error) {
       console.error('Error in wallet creation:', error);
       showError(error.message || 'Failed to create wallet and register biometrics');

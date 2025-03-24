@@ -4,13 +4,14 @@ import { type Address, type Hex } from 'viem';
 import { toSafeSmartAccount } from 'permissionless/accounts';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ENTRY_POINT_ADDRESS, getActiveChain, createPublicClient as createChainAgnosticPublicClient } from './client-setup.js';
+import { ENTRY_POINT_ADDRESS, getActiveChain, createPublicClient as createChainPublicClient, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createPimlicoClientInstance, type ClientSetup } from './client-setup.js';
 import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
+import { createPublicClient as viemCreatePublicClient } from 'viem';
 
 // WebAuthn settings
 export const rpName = 'Nyx Wallet';
@@ -30,6 +31,15 @@ export interface UserAccount {
   authType: 'biometric' | 'social' | 'direct';
   credentials?: any[];
   createdAt: Date;
+  serverKey?: string;
+  recoveryKeyHash?: string;
+}
+
+// Types for distributed key management
+export interface DistributedKeys {
+  deviceKey: Hex;
+  serverKey: Hex;
+  recoveryKey: Hex;
 }
 
 // In-memory user accounts loaded from persistent storage
@@ -109,7 +119,7 @@ export async function createSmartAccountFromPrivateKey(privateKey: Hex): Promise
   const owner = privateKeyToAccount(privateKey);
   
   // Use the chain-agnostic public client instead of hardcoding Sepolia
-  const publicClient = createChainAgnosticPublicClient();
+  const publicClient = createChainPublicClient();
   
   // Log which chain we're using for account creation
   const activeChain = getActiveChain();
@@ -138,12 +148,53 @@ export async function createSmartAccountFromCredential(
 ): Promise<{
   address: Address;
   privateKey: Hex;
+  clientSetup: ClientSetup;
 }> {
-  // Generate a deterministic key from the user ID and auth type
-  const seed = `${userId}-${authType}-${process.env.KEY_SEED || 'nyx-wallet-seed'}`;
-  const privateKey = generateDeterministicPrivateKey(seed);
+  // Generate distributed keys
+  const { deviceKey, serverKey, recoveryKey } = generateDistributedKeys();
   
-  return await createSmartAccountFromPrivateKey(privateKey);
+  // Store the keys securely
+  await storeKeys(userId, deviceKey, serverKey, recoveryKey);
+  
+  // Create a deterministic key from the combined device and server keys
+  const combinedKey = `0x${createHash('sha256')
+    .update(deviceKey + serverKey)
+    .digest('hex')}` as Hex;
+  
+  // Create the owner account
+  const owner = privateKeyToAccount(combinedKey);
+  
+  // Initialize blockchain clients
+  const publicClient = createChainPublicClient();
+  const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+  
+  // Create the smart account
+  const smartAccount = await createSafeSmartAccount(publicClient, owner);
+  
+  // Set up the smart account client with paymaster
+  const activeChain = getActiveChain();
+  const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+  
+  const smartAccountClient = createSmartAccountClientWithPaymaster(
+    smartAccount,
+    pimlicoClient,
+    pimlicoUrl
+  );
+  
+  // Create the complete client setup
+  const clientSetup: ClientSetup = {
+    publicClient,
+    pimlicoClient,
+    owner,
+    smartAccount,
+    smartAccountClient
+  };
+  
+  return {
+    address: smartAccount.address,
+    privateKey: combinedKey,
+    clientSetup
+  };
 }
 
 // Find a user by ID
@@ -222,21 +273,152 @@ export function updateUserCredentials(userId: string, credential: any): void {
 // Sign transaction with biometrics
 export async function signTransactionWithBiometrics(
   userId: string,
-  transactionHash: string
+  transactionHash: string,
+  deviceKey: Hex
 ): Promise<{ signature: string }> {
   const user = findUserById(userId);
   if (!user) {
     throw new Error('User not found');
   }
   
-  if (!user.privateKey) {
-    throw new Error('User has no private key');
-  }
+  // Get the server key
+  const { serverKey } = await getKeys(userId);
   
-  // Sign the transaction hash with the user's private key
-  const wallet = new ethers.Wallet(user.privateKey);
+  // Combine the keys
+  const combinedKey = `0x${createHash('sha256')
+    .update(deviceKey + serverKey)
+    .digest('hex')}` as Hex;
+  
+  // Sign the transaction hash with the combined key
+  const wallet = new ethers.Wallet(combinedKey);
   const messageHashBytes = ethers.utils.arrayify(transactionHash);
   const signature = await wallet.signMessage(messageHashBytes);
   
   return { signature };
+}
+
+// Generate distributed keys for a new wallet
+function generateDistributedKeys(): DistributedKeys {
+  // Generate three separate keys: device, server, and recovery
+  const deviceKey = generateRandomPrivateKey();
+  const serverKey = generateRandomPrivateKey();
+  const recoveryKey = generateRandomPrivateKey();
+  
+  return {
+    deviceKey,
+    serverKey,
+    recoveryKey
+  };
+}
+
+// Store keys securely
+async function storeKeys(
+  userId: string,
+  deviceKey: Hex,
+  serverKey: Hex,
+  recoveryKey: Hex
+): Promise<void> {
+  // Find the user
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  // Store the server key with the user account
+  // The device key will be stored in the authenticator
+  // The recovery key should be shown to the user for backup
+  user.serverKey = serverKey;
+  
+  // Store a hash of the recovery key for verification
+  user.recoveryKeyHash = createHash('sha256')
+    .update(recoveryKey.slice(2)) // Remove '0x' prefix
+    .digest('hex');
+  
+  // Save the updated user data
+  saveUserData();
+}
+
+// Get keys for signing
+export async function getKeys(userId: string): Promise<{
+  deviceKey: Hex;
+  serverKey: Hex;
+}> {
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error(`User with ID ${userId} not found`);
+  }
+
+  if (!user.serverKey) {
+    throw new Error('Server key not found');
+  }
+
+  // Decrypt server key
+  const serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+  
+  // Device key is retrieved by the client-side code
+  // Return a placeholder that will be replaced by the client
+  return {
+    deviceKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
+    serverKey
+  };
+}
+
+// Verify recovery key
+export function verifyRecoveryKey(userId: string, recoveryKey: Hex): boolean {
+  const user = findUserById(userId);
+  if (!user || !user.recoveryKeyHash) {
+    return false;
+  }
+
+  const providedKeyHash = createHash('sha256').update(recoveryKey).digest('hex');
+  return providedKeyHash === user.recoveryKeyHash;
+}
+
+// Get the smart account client for a user
+export async function getSmartAccountClient(userId: string) {
+  // Find the user
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error('User not found');
+  }
+  
+  // Get the server key
+  const serverKey = user.serverKey;
+  if (!serverKey) {
+    throw new Error('Server key not found');
+  }
+  
+  // Get the device key from the authenticator
+  // For now, we'll use a placeholder since this will be handled by WebAuthn
+  const deviceKey = serverKey; // This is temporary
+  
+  // Create a deterministic key from the combined device and server keys
+  const combinedKey = `0x${createHash('sha256')
+    .update(deviceKey + serverKey)
+    .digest('hex')}` as Hex;
+  
+  // Create the owner account
+  const owner = privateKeyToAccount(combinedKey);
+  
+  // Initialize blockchain clients
+  const publicClient = createChainPublicClient();
+  const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+  
+  // Create the smart account
+  const smartAccount = await createSafeSmartAccount(publicClient, owner);
+  
+  // Set up the smart account client with paymaster
+  const activeChain = getActiveChain();
+  const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+  
+  const smartAccountClient = createSmartAccountClientWithPaymaster(
+    smartAccount,
+    pimlicoClient,
+    pimlicoUrl
+  );
+  
+  return {
+    smartAccount,
+    smartAccountClient
+  };
 } 

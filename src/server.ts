@@ -10,15 +10,11 @@ import fs from 'fs';
 import { Hex, encodeFunctionData, http, type Address } from 'viem';
 import { sepolia } from 'viem/chains';
 import { 
-  validateEnvironment, 
-  createOwnerAccount, 
-  createPublicClient, 
-  createPimlicoClientInstance, 
-  createSafeSmartAccount,
-  getActiveChain 
+  validateEnvironment,
+  getActiveChain,
+  createPublicClient
 } from './utils/client-setup.js';
 import { sendTransaction, GasPaymentMethod } from './usdc-gas-payment.js';
-import { createSmartAccountClient } from 'permissionless';
 import { verifyCalldata, checkRecipientRisk, simulateTransaction, checkEtherscanData, aiTransactionAnalysis } from './utils/transaction-safety.js';
 import authRoutes from './routes/auth-routes.js';
 import { initializeStorage } from './utils/auth-utils.js';
@@ -62,42 +58,6 @@ function saveAddresses() {
     fs.writeFileSync(savedAddressesPath, JSON.stringify(savedAddresses, null, 2));
   } catch (error) {
     console.error('Error saving addresses:', error);
-  }
-}
-
-// Function to initialize wallet
-async function initializeWallet() {
-  try {
-    const { apiKey, privateKey } = validateEnvironment();
-    const owner = createOwnerAccount(privateKey);
-    
-    // Use the chain-agnostic public client instead of Sepolia-specific client
-    const publicClient = createPublicClient();
-    const activeChain = getActiveChain();
-    console.log(`Initializing wallet on ${activeChain.chain.name} chain`);
-    
-    const pimlicoClient = createPimlicoClientInstance(apiKey);
-    
-    console.log('Loading Safe smart account...');
-    const safeAccount = await createSafeSmartAccount(publicClient, owner);
-    
-    console.log(`Smart account address: ${safeAccount.address}`);
-    
-    // Check ETH balance
-    const ethBalance = await publicClient.getBalance({
-      address: safeAccount.address,
-    });
-    
-    return {
-      owner,
-      publicClient,
-      pimlicoClient,
-      safeAccount,
-      ethBalance
-    };
-  } catch (error) {
-    console.error('Failed to initialize wallet:', error);
-    throw error;
   }
 }
 
@@ -228,11 +188,9 @@ router.get('/', async (ctx) => {
     }
     
     // Get active chain information
-    const { getActiveChain } = await import('./utils/client-setup.js');
     const activeChain = getActiveChain();
     
     // Get the public client for blockchain interactions
-    const { createPublicClient } = await import('./utils/client-setup.js');
     const publicClient = createPublicClient();
     
     // Get the wallet's ETH balance
@@ -246,7 +204,7 @@ router.get('/', async (ctx) => {
       title: `${APP_NAME} - Bringing Light to Crypto`,
       wallet: {
         address: user.walletAddress,
-        ownerAddress: user.walletAddress, // For smart accounts, this would be different
+        ownerAddress: user.walletAddress,
         ethBalance: ethBalance.toString(),
         chain: {
           name: activeChain.chain.name,
@@ -266,54 +224,34 @@ router.get('/', async (ctx) => {
 });
 
 // Wallet creation endpoint for non-authenticated users
-// IMPORTANT: Remove the duplicate route from auth-routes.ts if it exists
-// This is a direct endpoint without the /api/auth prefix
 router.post('/api/wallet/create', async (ctx) => {
   try {
-    const { generateRandomPrivateKey, createSmartAccountFromPrivateKey, createUser } = await import('./utils/auth-utils.js');
+    const { createSmartAccountFromCredential, createUser } = await import('./utils/auth-utils.js');
     
-    // Generate a new random private key
-    const privateKey = generateRandomPrivateKey();
+    // Create a new user first
+    const tempUserId = 'temp_' + Date.now();
+    const user = createUser('user_' + tempUserId.slice(0, 6), 'biometric');
     
-    console.log("Generated private key for wallet creation");
+    // Create a smart account using biometric credentials
+    const { address, privateKey, clientSetup } = await createSmartAccountFromCredential(
+      user.id,
+      'biometric'
+    );
     
-    try {
-      // Create a smart account from the private key
-      const { address, privateKey: savedKey } = await createSmartAccountFromPrivateKey(privateKey);
-      
-      // Create a new user with the wallet
-      const user = createUser('user_' + address.slice(0, 6), 'direct', address, savedKey);
-      
-      // Set session
-      ctx.session.userId = user.id;
-      
-      ctx.body = {
-        success: true,
-        wallet: {
-          address,
-          type: 'smart-account'
-        }
-      };
-    } catch (error) {
-      console.error('Error in smart account creation:', error);
-      
-      // Fallback to creating a simple EOA wallet without smart account
-      // This will allow the app to work even when network calls fail
-      const address = '0x' + privateKey.slice(2).padStart(40, '0');
-      const user = createUser('user_' + address.slice(0, 6), 'direct', address, privateKey);
-      
-      // Set session
-      ctx.session.userId = user.id;
-      
-      ctx.body = {
-        success: true,
-        wallet: {
-          address,
-          type: 'simple-account',
-          fallback: true
-        }
-      };
-    }
+    // Update the user with the wallet address
+    user.walletAddress = address;
+    
+    // Set session
+    ctx.session.userId = user.id;
+    ctx.session.tempUserId = user.id; // Store temp ID for biometric registration
+    
+    ctx.body = {
+      success: true,
+      wallet: {
+        address,
+        type: 'smart-account'
+      }
+    };
   } catch (error) {
     console.error('Error creating wallet:', error);
     ctx.status = 500;
@@ -373,7 +311,7 @@ router.get('/account', async (ctx) => {
 // Endpoint to send a transaction
 router.post('/api/transaction/send', async (ctx) => {
   const body = ctx.request.body as any;
-  const { to, amount, currency, message, gasPaymentMethod, submissionMethod } = body;
+  const { to, amount, currency, message, gasPaymentMethod: requestedGasPayment } = body;
 
   try {
     // Check if user is logged in
@@ -387,47 +325,44 @@ router.post('/api/transaction/send', async (ctx) => {
     const { findUserById } = await import('./utils/auth-utils.js');
     const user = findUserById(ctx.session.userId);
     
-    if (!user || !user.walletAddress || !user.privateKey) {
+    if (!user || !user.walletAddress) {
       ctx.status = 401;
       ctx.body = { error: 'Invalid user or missing wallet' };
       return;
     }
 
     // Get necessary clients and configurations
-    const { validateEnvironment, createOwnerAccount, createPublicClient, createPimlicoClientInstance, createSafeSmartAccount, getActiveChain } = await import('./utils/client-setup.js');
+    const { validateEnvironment, getActiveChain } = await import('./utils/client-setup.js');
     const { apiKey } = validateEnvironment();
-    const owner = createOwnerAccount(user.privateKey);
-    const publicClient = createPublicClient();
-    const pimlicoClient = createPimlicoClientInstance(apiKey);
-    const smartAccount = await createSafeSmartAccount(publicClient, owner);
     
     // Log chain information
     const activeChain = getActiveChain();
     console.log(`Sending transaction on ${activeChain.chain.name} chain`);
 
     console.log(`Sending transaction: ${amount} ${currency} to ${to}`);
-    console.log(`Gas payment method: ${gasPaymentMethod}`);
-    console.log(`Submission method: ${submissionMethod}`);
+    console.log(`Gas payment method: ${requestedGasPayment}`);
     
-    // Validate inputs
-    if (!to || !to.startsWith('0x')) {
+    // Validate inputs and ensure address is properly formatted
+    if (!to || !to.startsWith('0x') || to.length !== 42) {
       ctx.status = 400;
       ctx.body = { error: 'Invalid recipient address' };
       return;
     }
 
     // Create Gas Payment Method enum value
-    let gasPayment;
-    switch (gasPaymentMethod) {
+    let gasPayment: GasPaymentMethod;
+    switch (requestedGasPayment) {
       case 'usdc':
         gasPayment = GasPaymentMethod.USDC;
         break;
       case 'sponsored':
         gasPayment = GasPaymentMethod.SPONSORED;
         break;
+      case 'bundler':
+        gasPayment = GasPaymentMethod.BUNDLER;
+        break;
       default:
-        // Use a string conversion for ETH since it appears the enum doesn't have this value
-        gasPayment = 'eth';
+        gasPayment = GasPaymentMethod.DEFAULT;
     }
     
     let txHash;
@@ -440,24 +375,29 @@ router.post('/api/transaction/send', async (ctx) => {
         return;
       }
       
+      // Get the user's smart account client
+      const { getSmartAccountClient } = await import('./utils/auth-utils.js');
+      const { smartAccount, smartAccountClient } = await getSmartAccountClient(user.id);
+      
+      const messageData = message ? encodeFunctionData({
+        abi: [{
+          type: 'function',
+          name: 'setMessage',
+          inputs: [{ type: 'string', name: 'message' }],
+          outputs: [],
+          stateMutability: 'nonpayable'
+        }],
+        functionName: 'setMessage',
+        args: [message]
+      }) : '0x' as const;
+
+      // Ensure the address is properly typed for viem
+      const recipientAddress = to.toLowerCase() as `0x${string}`;
+      
       txHash = await sendTransaction({
-        smartAccount,
-        owner,
-        publicClient,
-        pimlicoClient,
-        to: to as Address,
+        recipient: recipientAddress,
         value: BigInt(Math.floor(etherAmount * 1e18)), // Convert to wei as BigInt
-        data: message ? encodeFunctionData({
-          abi: [{
-            type: 'function',
-            name: 'setMessage',
-            inputs: [{ type: 'string', name: 'message' }],
-            outputs: [],
-            stateMutability: 'nonpayable'
-          }],
-          functionName: 'setMessage',
-          args: [message]
-        }) : '0x',
+        data: messageData,
         gasPaymentMethod: gasPayment
       });
     } else if (currency === 'usdc') {
@@ -657,20 +597,34 @@ router.post('/api/check-transaction-safety', async (ctx) => {
   const { calldata, to, value } = body;
   
   try {
+    // Check if user is logged in
+    if (!ctx.session || !ctx.session.userId) {
+      ctx.status = 401;
+      ctx.body = { error: 'Authentication required' };
+      return;
+    }
+    
+    // Get user from the authentication system
+    const { findUserById } = await import('./utils/auth-utils.js');
+    const user = findUserById(ctx.session.userId);
+    
+    if (!user || !user.walletAddress) {
+      ctx.status = 401;
+      ctx.body = { error: 'Invalid user or missing wallet' };
+      return;
+    }
+
     // Fix function parameter counts to match implementation
     const calldataVerification = await verifyCalldata(calldata, to);
-    
     const recipientRisk = await checkRecipientRisk(to);
-    
     const simulationResult = await simulateTransaction({
-      sender: safeAccount.address,  // Use the safe account address as the sender
-      recipient: to,                // Recipient address
-      callData: calldata,           // The transaction calldata
-      value: value.toString()       // The value as a string
+      sender: user.walletAddress,  // Use the user's wallet address as the sender
+      recipient: to,               // Recipient address
+      callData: calldata,          // The transaction calldata
+      value: value.toString()      // The value as a string
     });
     
     const etherscanData = await checkEtherscanData(to);
-    
     const aiAnalysis = await aiTransactionAnalysis({
       to,
       data: calldata,

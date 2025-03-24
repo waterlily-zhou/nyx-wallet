@@ -59,32 +59,42 @@ async function initializeWallet() {
   console.log('🔐 Initializing wallet...');
   
   try {
-    const { apiKey, privateKey } = validateEnvironment();
-    const owner = createOwnerAccount(privateKey);
+    const { apiKey } = validateEnvironment();
     
-    // Use the chain-agnostic public client instead of Sepolia-specific client
-    const publicClient = createPublicClient();
+    // Create a new CLI user if one doesn't exist
+    const { createUser, createSmartAccountFromCredential } = await import('./utils/auth-utils.js');
+    
+    // Use a deterministic ID for CLI to maintain consistency
+    const cliUserId = 'cli_user';
+    
+    // Create a smart account using CLI credentials
+    const { address, privateKey, clientSetup } = await createSmartAccountFromCredential(
+      cliUserId,
+      'direct' // Use direct auth for CLI
+    );
+    
+    // Create or update CLI user
+    const user = createUser('CLI User', 'direct', address);
+    
+    // Use the chain-agnostic public client
     const activeChain = getActiveChain();
     console.log(`🌐 Using ${activeChain.chain.name} chain (${activeChain.chain.id})`);
     
-    const pimlicoClient = createPimlicoClientInstance(apiKey);
+    const { publicClient, pimlicoClient, smartAccount } = clientSetup;
     
-    console.log('🔨 Loading Safe smart account...');
-    const safeAccount = await createSafeSmartAccount(publicClient, owner);
-    
-    console.log(`💼 Smart account address: ${safeAccount.address}`);
+    console.log(`💼 Smart account address: ${smartAccount.address}`);
     
     // Check ETH balance
     const ethBalance = await publicClient.getBalance({
-      address: safeAccount.address,
+      address: smartAccount.address,
     });
     console.log(`💰 ETH balance: ${ethBalance} wei`);
     
     return {
-      owner,
+      owner: clientSetup.owner,
       publicClient,
       pimlicoClient,
-      safeAccount
+      safeAccount: smartAccount
     };
   } catch (error) {
     console.error('Failed to initialize wallet:', error);

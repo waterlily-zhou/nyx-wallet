@@ -13,8 +13,10 @@ import {
   updateUserCredentials, 
   userAccounts, 
   type UserAccount,
-  signTransactionWithBiometrics
+  signTransactionWithBiometrics,
+  getKeys
 } from '../utils/auth-utils.js';
+import { getActiveChain } from '../utils/client-setup.js';
 
 const router = new Router({ prefix: '/api/auth' });
 
@@ -206,12 +208,8 @@ router.post('/biometric/register/complete', async (ctx: any) => {
     // Create credential object - safely handle the registrationInfo properties
     const credential = {
       id: body.id,
-      publicKey: registrationInfo.credentialPublicKey 
-        ? Buffer.from(registrationInfo.credentialPublicKey).toString('base64')
-        : registrationInfo.credential && registrationInfo.credential.publicKey 
-          ? registrationInfo.credential.publicKey
-          : null,
-      counter: typeof registrationInfo.counter === 'number' ? registrationInfo.counter : 0,
+      publicKey: registrationInfo.credential?.publicKey || null,
+      counter: registrationInfo.credential?.counter || 0,
       deviceId: ctx.cookies.get('deviceId')
     };
     
@@ -239,47 +237,62 @@ router.post('/biometric/register/complete', async (ctx: any) => {
         }
       };
     } else {
-      // For new accounts, create a new wallet
+      // For new accounts, create a new wallet with distributed keys
       try {
-        console.log('Creating smart account for new user with biometrics');
-        const { address, privateKey } = await createSmartAccountFromCredential(userId, 'biometric');
+        console.log('Creating smart account for new user with biometrics and distributed keys');
+        const { address, privateKey, clientSetup } = await createSmartAccountFromCredential(userId, 'biometric');
         console.log(`Smart account created: ${address}`);
         
         // Create new user or update existing user
         if (!user) {
-          user = createUser(`user_${userId.slice(0, 6)}`, 'biometric', address, privateKey);
-          user.id = userId; // Use tempUserId as the actual userId
+          user = createUser(
+            `user_${userId.slice(0, 6)}`, // username
+            'biometric',                   // authType
+            address,                       // walletAddress
+            privateKey                     // privateKey
+          );
         }
         
-        // Add credential to user
+        // Add the credential to the user
         updateUserCredentials(userId, credential);
         
-        // Set session
-        ctx.session.userId = user.id;
+        // Get the device key from the distributed keys
+        const { deviceKey } = await getKeys(userId);
         
         ctx.body = {
           success: true,
+          message: 'Wallet created successfully',
           wallet: {
             address,
             type: 'smart-account'
+          },
+          deviceKey, // Include the device key in the response
+          clientSetup: {
+            // Only include necessary client setup information
+            address: clientSetup.smartAccount.address,
+            chain: getActiveChain().chain.name
           }
         };
       } catch (error) {
-        console.error('Error creating smart account:', error);
-        throw error;
+        console.error('Error creating wallet:', error);
+        ctx.status = 500;
+        ctx.body = { 
+          error: 'Failed to create wallet',
+          details: error instanceof Error ? error.message : 'Unknown error'
+        };
+        return;
       }
     }
     
-    // Clean up session
+    // Clean up session variables
     delete ctx.session.tempUserId;
     delete ctx.session.challenge;
     delete ctx.session.forExistingAccount;
-    
   } catch (error) {
-    console.error('Error verifying registration:', error);
+    console.error('Error completing registration:', error);
     ctx.status = 500;
     ctx.body = { 
-      error: 'Failed to complete registration',
+      error: 'Registration failed',
       details: error instanceof Error ? error.message : 'Unknown error'
     };
   }
@@ -670,7 +683,11 @@ router.post('/biometric/transaction/verify', requireAuth, async (ctx) => {
       }
       
       // Call function to sign transaction with user's key
-      const signResult = await signTransactionWithBiometrics(user.id, transactionHash);
+      const signResult = await signTransactionWithBiometrics(
+        user.id,
+        transactionHash,
+        '0x0000000000000000000000000000000000000000000000000000000000000000' // Placeholder device key
+      );
       
       // Clean up session
       delete ctx.session.transactionChallenge;
