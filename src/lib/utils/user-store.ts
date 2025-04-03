@@ -4,7 +4,7 @@ import { type Address, type Hex } from 'viem';
 import { toSafeSmartAccount } from 'permissionless/accounts';
 import { createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ENTRY_POINT_ADDRESS, getActiveChain, createPublicClient as createChainPublicClient, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createPimlicoClientInstance, type ClientSetup } from './client-setup.js';
+import { ENTRY_POINT_ADDRESS, getActiveChain, createPublicClient as createChainPublicClient, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createPimlicoClientInstance, type ClientSetup } from './client-setup';
 import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
@@ -12,6 +12,8 @@ import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
 import { createPublicClient as viemCreatePublicClient } from 'viem';
+import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys, hashRecoveryKey } from './key-encryption';
+import { Authenticator, EncryptedKey, AuthenticatorDevice } from '../types/credentials';
 
 // WebAuthn settings
 export const rpName = 'Nyx Wallet';
@@ -21,6 +23,7 @@ export const origin = process.env.ORIGIN || `http://${rpID}:3000`;
 // Storage file path
 const DATA_DIR = path.join(process.cwd(), 'data');
 const USERS_FILE = path.join(DATA_DIR, 'users.json');
+const AUTHENTICATORS_FILE = path.join(DATA_DIR, 'authenticators.json');
 
 // Types
 export interface UserAccount {
@@ -29,9 +32,10 @@ export interface UserAccount {
   walletAddress?: Address;
   privateKey?: Hex;
   authType: 'biometric' | 'social' | 'direct';
+  authenticators?: Authenticator[];
   credentials?: any[];
   createdAt: Date;
-  serverKey?: string;
+  serverKey?: string | EncryptedKey;
   recoveryKeyHash?: string;
 }
 
@@ -44,6 +48,7 @@ export interface DistributedKeys {
 
 // In-memory user accounts loaded from persistent storage
 export let userAccounts: UserAccount[] = [];
+export let authenticatorDevices: AuthenticatorDevice[] = [];
 
 // Initialize storage on startup
 export function initializeStorage(): void {
@@ -59,9 +64,11 @@ export function initializeStorage(): void {
   
   // Load user accounts from storage
   loadUserData();
+  loadAuthenticatorData();
   
   // Log the result
   console.log(`Loaded ${userAccounts.length} user accounts from storage`);
+  console.log(`Loaded ${authenticatorDevices.length} authenticator devices from storage`);
 }
 
 // Load user data from storage
@@ -108,10 +115,71 @@ function loadUserData(): void {
   }
 }
 
-// Generate a random private key
-export function generateRandomPrivateKey(): Hex {
-  const privateKey = `0x${randomBytes(32).toString('hex')}` as Hex;
-  return privateKey;
+// Load authenticator data from storage
+function loadAuthenticatorData(): void {
+  try {
+    // Check if the authenticators file exists
+    if (fs.existsSync(AUTHENTICATORS_FILE)) {
+      // Read and parse the authenticator data
+      const data = fs.readFileSync(AUTHENTICATORS_FILE, 'utf8');
+      const parsedData = JSON.parse(data);
+      
+      // Convert ISO date strings back to Date objects and Buffer objects
+      authenticatorDevices = parsedData.map((device: any) => ({
+        ...device,
+        createdAt: new Date(device.createdAt),
+        lastUsed: device.lastUsed ? new Date(device.lastUsed) : undefined,
+        credentialPublicKey: device.credentialPublicKey ? Buffer.from(device.credentialPublicKey, 'base64') : undefined
+      }));
+    } else {
+      console.log('No authenticator data file found, starting with empty authenticators');
+      authenticatorDevices = [];
+    }
+  } catch (error) {
+    console.error('Error loading authenticator data:', error);
+    authenticatorDevices = [];
+  }
+}
+
+// Save user data to storage
+function saveUserData(): void {
+  try {
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    
+    // Write user data to file
+    const data = JSON.stringify(userAccounts, null, 2);
+    fs.writeFileSync(USERS_FILE, data, 'utf8');
+    console.log(`Saved ${userAccounts.length} users to storage`);
+  } catch (error) {
+    console.error('Error saving user data:', error);
+  }
+}
+
+// Save authenticator data to storage
+function saveAuthenticatorData(): void {
+  try {
+    // Create the directory if it doesn't exist
+    if (!fs.existsSync(DATA_DIR)) {
+      fs.mkdirSync(DATA_DIR, { recursive: true });
+    }
+    
+    // Convert Buffer objects to base64 strings for storage
+    const dataToSave = authenticatorDevices.map(device => ({
+      ...device,
+      credentialPublicKey: device.credentialPublicKey ? 
+        Buffer.from(device.credentialPublicKey).toString('base64') : undefined
+    }));
+    
+    // Write authenticator data to file
+    const data = JSON.stringify(dataToSave, null, 2);
+    fs.writeFileSync(AUTHENTICATORS_FILE, data, 'utf8');
+    console.log(`Saved ${authenticatorDevices.length} authenticators to storage`);
+  } catch (error) {
+    console.error('Error saving authenticator data:', error);
+  }
 }
 
 // Encrypt a private key with a password
@@ -181,9 +249,7 @@ export async function createSmartAccountFromCredential(
   await storeKeys(userId, deviceKey, serverKey, recoveryKey);
   
   // Create a deterministic key from the combined device and server keys
-  const combinedKey = `0x${createHash('sha256')
-    .update(deviceKey + serverKey)
-    .digest('hex')}` as Hex;
+  const combinedKey = combineKeys(deviceKey, serverKey);
   
   // Create the owner account
   const owner = privateKeyToAccount(combinedKey);
@@ -256,6 +322,54 @@ export function findUserByWalletAddress(address: Address): UserAccount | undefin
   return userAccounts.find(user => user.walletAddress?.toLowerCase() === address.toLowerCase());
 }
 
+// Find authenticator by credential ID
+export function findAuthenticatorByCredentialId(credentialId: string): AuthenticatorDevice | undefined {
+  return authenticatorDevices.find(device => device.credentialID === credentialId);
+}
+
+// Find authenticators by wallet address
+export function findAuthenticatorsByWalletAddress(address: Address): AuthenticatorDevice[] {
+  return authenticatorDevices.filter(device => device.walletAddress.toLowerCase() === address.toLowerCase());
+}
+
+// Add a new authenticator for a wallet
+export function addAuthenticator(authenticator: AuthenticatorDevice): void {
+  // Add id if not provided
+  if (!authenticator.id) {
+    authenticator.id = crypto.randomUUID();
+  }
+  
+  // Set creation time if not provided
+  if (!authenticator.createdAt) {
+    authenticator.createdAt = new Date();
+  }
+  
+  // Add to the list
+  authenticatorDevices.push(authenticator);
+  
+  // Save to storage
+  saveAuthenticatorData();
+  
+  console.log(`Added authenticator ${authenticator.id} for wallet ${authenticator.walletAddress}`);
+}
+
+// Update an authenticator
+export function updateAuthenticator(authenticator: AuthenticatorDevice): void {
+  const index = authenticatorDevices.findIndex(a => a.id === authenticator.id);
+  
+  if (index === -1) {
+    throw new Error(`Authenticator with ID ${authenticator.id} not found`);
+  }
+  
+  // Update the authenticator
+  authenticatorDevices[index] = authenticator;
+  
+  // Save to storage
+  saveAuthenticatorData();
+  
+  console.log(`Updated authenticator ${authenticator.id}`);
+}
+
 // Create a new user
 export function createUser(
   username: string,
@@ -271,6 +385,7 @@ export function createUser(
     authType,
     walletAddress,
     privateKey,
+    authenticators: [],
     credentials: [],
     createdAt: new Date()
   };
@@ -280,89 +395,25 @@ export function createUser(
   return user;
 }
 
-// Save user data to storage
-function saveUserData(): void {
-  try {
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    
-    // Write user data to file
-    const data = JSON.stringify(userAccounts, null, 2);
-    fs.writeFileSync(USERS_FILE, data, 'utf8');
-    console.log(`Saved ${userAccounts.length} users to storage`);
-  } catch (error) {
-    console.error('Error saving user data:', error);
-  }
-}
-
-// Update user credentials (for biometric registration)
-export function updateUserCredentials(userId: string, credential: any): void {
-  const user = findUserById(userId);
+// Update an existing user
+export function updateUser(updatedUser: UserAccount): void {
+  const index = userAccounts.findIndex(user => user.id === updatedUser.id);
   
-  if (!user) {
-    throw new Error(`User with ID ${userId} not found`);
+  if (index === -1) {
+    throw new Error(`User with ID ${updatedUser.id} not found`);
   }
   
-  // Initialize credentials array if it doesn't exist
-  if (!user.credentials) {
-    user.credentials = [];
-  }
+  // Update the user
+  userAccounts[index] = updatedUser;
   
-  // Add new credential
-  user.credentials.push(credential);
-  
-  // Save user data
+  // Save the updated user data
   saveUserData();
   
-  console.log(`Updated credentials for user ${userId}. Total credentials: ${user.credentials.length}`);
-}
-
-// Sign transaction with biometrics
-export async function signTransactionWithBiometrics(
-  userId: string,
-  transactionHash: string,
-  deviceKey: Hex
-): Promise<{ signature: string }> {
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error('User not found');
-  }
-  
-  // Get the server key
-  const { serverKey } = await getKeys(userId);
-  
-  // Combine the keys
-  const combinedKey = `0x${createHash('sha256')
-    .update(deviceKey + serverKey)
-    .digest('hex')}` as Hex;
-  
-  // Sign the transaction hash with the combined key
-  const wallet = new ethers.Wallet(combinedKey);
-  const messageHashBytes = ethers.utils.arrayify(transactionHash);
-  const signature = await wallet.signMessage(messageHashBytes);
-  
-  return { signature };
-}
-
-//* SIGNER 3: DKG -> SCA
-// Generate distributed keys for a new wallet
-function generateDistributedKeys(): DistributedKeys {
-  // Generate three separate keys: device, server, and recovery
-  const deviceKey = generateRandomPrivateKey();
-  const serverKey = generateRandomPrivateKey();
-  const recoveryKey = generateRandomPrivateKey();
-  
-  return {
-    deviceKey,
-    serverKey,
-    recoveryKey
-  };
+  console.log(`Updated user ${updatedUser.id}`);
 }
 
 // Store keys securely
-async function storeKeys(
+export async function storeKeys(
   userId: string,
   deviceKey: Hex,
   serverKey: Hex,
@@ -374,18 +425,16 @@ async function storeKeys(
     throw new Error('User not found');
   }
   
-  // Store the server key with the user account
-  // The device key will be stored in the authenticator
-  // The recovery key should be shown to the user for backup
-  user.serverKey = serverKey;
+  // Encrypt the server key with the master key
+  user.serverKey = encryptData(serverKey);
   
   // Store a hash of the recovery key for verification
-  user.recoveryKeyHash = createHash('sha256')
-    .update(recoveryKey.slice(2)) // Remove '0x' prefix
-    .digest('hex');
+  user.recoveryKeyHash = hashRecoveryKey(recoveryKey);
   
   // Save the updated user data
   saveUserData();
+  
+  console.log(`Stored keys for user ${userId}`);
 }
 
 // Get keys for signing
@@ -403,13 +452,20 @@ export async function getKeys(userId: string): Promise<{
   }
 
   // Decrypt server key
-  const serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+  let serverKey: string;
+  if (typeof user.serverKey === 'string') {
+    // Legacy format
+    serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+  } else {
+    // New encrypted format
+    serverKey = decryptData(user.serverKey);
+  }
   
   // Device key is retrieved by the client-side code
   // Return a placeholder that will be replaced by the client
   return {
-    deviceKey: '0x0000000000000000000000000000000000000000000000000000000000000000',
-    serverKey
+    deviceKey: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
+    serverKey: serverKey as Hex
   };
 }
 
@@ -420,7 +476,7 @@ export function verifyRecoveryKey(userId: string, recoveryKey: Hex): boolean {
     return false;
   }
 
-  const providedKeyHash = createHash('sha256').update(recoveryKey).digest('hex');
+  const providedKeyHash = hashRecoveryKey(recoveryKey);
   return providedKeyHash === user.recoveryKeyHash;
 }
 
@@ -432,20 +488,11 @@ export async function getSmartAccountClient(userId: string) {
     throw new Error('User not found');
   }
   
-  // Get the server key
-  const serverKey = user.serverKey;
-  if (!serverKey) {
-    throw new Error('Server key not found');
-  }
-  
-  // Get the device key from the authenticator
-  // For now, we'll use a placeholder since this will be handled by WebAuthn
-  const deviceKey = serverKey; // This is temporary
+  // Get the keys
+  const { deviceKey, serverKey } = await getKeys(userId);
   
   // Create a deterministic key from the combined device and server keys
-  const combinedKey = `0x${createHash('sha256')
-    .update(deviceKey + serverKey)
-    .digest('hex')}` as Hex;
+  const combinedKey = combineKeys(deviceKey, serverKey);
   
   // Create the owner account
   const owner = privateKeyToAccount(combinedKey);

@@ -804,5 +804,37 @@
     "createdAt": "2025-03-24T16:49:42.771Z",
     "serverKey": "0x5affa33a7972685cab9d6483b7bdac624017cdb49f679fc5b70b981906d0a0d4",
     "recoveryKeyHash": "37eedc024922426e1aef26243756f4eecffc1ca6fd199baf87fd04c503be237d"
+  },
+  {
+    "id": "0a0ee440098ef27f4fd62b9134becac0",
+    "username": "user_1743695193619",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T15:46:34.649Z"
+  },
+  {
+    "id": "452055c6dde592e067652a0733615eae",
+    "username": "user_1743695211171",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T15:46:51.241Z"
+  },
+  {
+    "id": "d190fbeabe9ba264c518ab288b477334",
+    "username": "user_1743695279818",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T15:48:00.889Z"
+  },
+  {
+    "id": "15de307bfd88671a44c29a1f45c7eae6",
+    "username": "user_1743695436577",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T15:50:37.669Z"
   }
 ]

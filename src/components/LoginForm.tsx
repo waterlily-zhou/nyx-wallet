@@ -3,13 +3,18 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useBiometricAuth } from '@/lib/hooks/useBiometricAuth';
+import { useWebAuthnRegistration } from '@/lib/hooks/useWebAuthnRegistration';
 
 export default function LoginForm() {
   const router = useRouter();
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const { isBiometricsAvailable, authenticateWithBiometrics } = useBiometricAuth();
+  const { register, isRegistering, registrationResult } = useWebAuthnRegistration();
   const [hasSavedWallet, setHasSavedWallet] = useState(false);
+  const [showRecoveryKey, setShowRecoveryKey] = useState(false);
+  const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
+  const [walletAddress, setWalletAddress] = useState<string | null>(null);
 
   useEffect(() => {
     // Check if there's a saved wallet
@@ -27,31 +32,76 @@ export default function LoginForm() {
 
     checkSavedWallet();
   }, []);
+  
+  useEffect(() => {
+    // If registration completed successfully, show the recovery key
+    if (registrationResult?.success && registrationResult.recoveryKey) {
+      setRecoveryKey(registrationResult.recoveryKey);
+      setWalletAddress(registrationResult.walletAddress || null);
+      setShowRecoveryKey(true);
+    }
+  }, [registrationResult]);
 
   const createWallet = async () => {
+    console.log('createWallet called');
+    
     try {
       setIsLoading(true);
       setError(null);
-
-      const response = await fetch('/api/wallet/create', {
+      
+      // Generate a default username based on timestamp
+      const defaultUsername = `user_${Date.now()}`;
+      console.log('Using default username:', defaultUsername);
+      
+      // Try WebAuthn registration with DKG first
+      try {
+        const result = await register({ username: defaultUsername });
+        console.log('Registration result:', result);
+        
+        if (result.success) {
+          // Registration successful, will be handled in the useEffect
+          return;
+        }
+        
+        // If we get here, registration failed but didn't throw an error
+        console.log('WebAuthn registration failed, falling back to simple wallet');
+      } catch (webAuthnError) {
+        // WebAuthn registration failed with an error
+        console.error('WebAuthn registration error:', webAuthnError);
+        console.log('Falling back to simple wallet creation');
+      }
+      
+      // Fallback: create a simple wallet without WebAuthn
+      const fallbackResponse = await fetch('/api/wallet/create-simple', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
         },
+        body: JSON.stringify({ username: defaultUsername }),
       });
-
-      if (!response.ok) {
-        throw new Error('Failed to create wallet');
+      
+      if (!fallbackResponse.ok) {
+        const errorData = await fallbackResponse.json();
+        throw new Error(errorData.error || 'Failed to create wallet');
       }
-
-      const data = await response.json();
-
-      if (!data.wallet || !data.wallet.address) {
-        throw new Error(data.error || 'Failed to create wallet');
+      
+      const fallbackResult = await fallbackResponse.json();
+      
+      if (!fallbackResult.success) {
+        throw new Error(fallbackResult.error || 'Failed to create wallet');
       }
-
-      router.push('/');
+      
+      // If fallback was successful, use the data
+      if (fallbackResult.recoveryKey) {
+        setRecoveryKey(fallbackResult.recoveryKey);
+        setWalletAddress(fallbackResult.walletAddress || null);
+        setShowRecoveryKey(true);
+      } else {
+        // No recovery key but creation was successful, just go to dashboard
+        router.push('/');
+      }
     } catch (err) {
+      console.error('Wallet creation error:', err);
       setError(err instanceof Error ? err.message : 'Failed to create wallet');
     } finally {
       setIsLoading(false);
@@ -72,7 +122,11 @@ export default function LoginForm() {
       }
 
       // Authenticate with biometrics
-      await authenticateWithBiometrics(challengeData.challenge);
+      const success = await authenticateWithBiometrics(challengeData.challenge);
+      
+      if (!success) {
+        throw new Error('Authentication failed');
+      }
 
       // Redirect to dashboard
       router.push('/');
@@ -82,6 +136,48 @@ export default function LoginForm() {
       setIsLoading(false);
     }
   };
+  
+  const handleContinueAfterRecovery = () => {
+    setShowRecoveryKey(false);
+    router.push('/');
+  };
+  
+  // Show the recovery key screen
+  if (showRecoveryKey && recoveryKey) {
+    return (
+      <div className="mt-8 space-y-6">
+        <div className="bg-yellow-50 border border-yellow-200 text-yellow-700 px-4 py-3 rounded relative" role="alert">
+          <strong className="font-bold">Important!</strong>
+          <p className="block sm:inline"> Save this recovery key securely. It will only be shown once.</p>
+        </div>
+        
+        <div className="bg-gray-100 p-4 rounded text-center font-mono break-all">
+          {recoveryKey}
+        </div>
+        
+        {walletAddress && (
+          <div className="mt-4">
+            <h3 className="text-sm font-medium text-gray-700">Wallet Address:</h3>
+            <div className="bg-gray-100 p-2 rounded text-center font-mono break-all text-sm">
+              {walletAddress}
+            </div>
+          </div>
+        )}
+        
+        <p className="text-sm text-gray-600">
+          This is your wallet recovery key. Store it in a secure password manager or write it down and keep it safe.
+          If you lose access to your device, you'll need this key to recover your wallet.
+        </p>
+        
+        <button
+          onClick={handleContinueAfterRecovery}
+          className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500"
+        >
+          I've saved my recovery key - Continue to Wallet
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="mt-8 space-y-6">
@@ -91,33 +187,32 @@ export default function LoginForm() {
         </div>
       )}
 
-      <div className="space-y-4">
-        {hasSavedWallet && isBiometricsAvailable && (
-          <button
-            onClick={handleBiometricAuth}
-            disabled={isLoading}
-            className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {isLoading ? (
-              <span className="flex items-center">
-                <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-                </svg>
-                Authenticating...
-              </span>
-            ) : (
-              'Sign in with Biometrics'
-            )}
-          </button>
-        )}
+      <div className="space-y-6">
+        {/* Sign in button - shown regardless of conditions */}
+        <button
+          onClick={handleBiometricAuth}
+          disabled={isLoading || isRegistering}
+          className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500 disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isLoading ? (
+            <span className="flex items-center">
+              <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+              </svg>
+              Authenticating...
+            </span>
+          ) : (
+            'Sign in to your wallet'
+          )}
+        </button>
 
         <button
           onClick={createWallet}
-          disabled={isLoading}
+          disabled={isLoading || isRegistering}
           className="group relative w-full flex justify-center py-2 px-4 border border-transparent text-sm font-medium rounded-md text-white bg-blue-600 hover:bg-blue-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-blue-500 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isLoading ? (
+          {isLoading || isRegistering ? (
             <span className="flex items-center">
               <svg className="animate-spin -ml-1 mr-3 h-5 w-5 text-white" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
                 <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
@@ -126,7 +221,7 @@ export default function LoginForm() {
               Creating Wallet...
             </span>
           ) : (
-            'Create New Wallet'
+            'Create a new wallet'
           )}
         </button>
       </div>
