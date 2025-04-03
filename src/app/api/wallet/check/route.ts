@@ -1,29 +1,27 @@
-import { NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import fs from 'fs/promises';
-import path from 'path';
+import { NextResponse } from 'next/server';
 
 export async function GET() {
   try {
+    console.log('Wallet check endpoint called');
     const cookieStore = cookies();
     const walletAddress = cookieStore.get('walletAddress')?.value;
+    const session = cookieStore.get('session')?.value;
 
-    if (!walletAddress) {
-      return NextResponse.json({ hasSavedWallet: false });
-    }
+    console.log('Checking wallet cookies:', { 
+      walletAddress: walletAddress || 'not found', 
+      session: session || 'not found' 
+    });
 
-    // Check if the wallet file exists
-    const walletPath = path.join(process.cwd(), 'data', 'wallets', `${walletAddress}.json`);
-    try {
-      await fs.access(walletPath);
-      return NextResponse.json({ hasSavedWallet: true });
-    } catch {
-      return NextResponse.json({ hasSavedWallet: false });
-    }
+    return NextResponse.json({
+      walletAddress,
+      hasWallet: !!walletAddress,
+      isAuthenticated: session === 'authenticated'
+    });
   } catch (error) {
     console.error('Error checking wallet:', error);
     return NextResponse.json(
-      { success: false, error: 'Failed to check wallet' },
+      { error: 'Failed to check wallet status' },
       { status: 500 }
     );
   }

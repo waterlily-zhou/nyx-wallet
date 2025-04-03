@@ -1,48 +1,105 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
+import { findUserById, findUserByWalletAddress } from '@/lib/utils/user-store';
+
+// WebAuthn settings
+const rpID = process.env.RP_ID || 'localhost';
+const expectedOrigin = process.env.ORIGIN || `http://${rpID}:3000`;
 
 export async function POST(request: NextRequest) {
   try {
+    console.log('Verify endpoint called');
     const cookieStore = cookies();
-    const walletAddress = cookieStore.get('walletAddress')?.value;
     const storedChallenge = cookieStore.get('auth_challenge')?.value;
+    const walletAddress = cookieStore.get('walletAddress')?.value;
+    
+    console.log('Stored challenge:', storedChallenge ? 'exists' : 'missing');
+    console.log('Wallet address:', walletAddress ? walletAddress : 'missing');
 
-    if (!walletAddress || !storedChallenge) {
-      return NextResponse.json(
-        { success: false, error: 'Invalid session' },
-        { status: 401 }
-      );
+    if (!storedChallenge) {
+      console.log('No authentication challenge found');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'No authentication challenge found'
+      }, { status: 400 });
     }
 
+    if (!walletAddress) {
+      return NextResponse.json({ 
+        success: false, 
+        error: 'No wallet address found in session'
+      }, { status: 401 });
+    }
+
+    // Get the credential from the request
     const body = await request.json();
-    const { id, type } = body;
+    console.log('Request body:', JSON.stringify(body));
+    const { credential } = body;
 
-    // Verify the credential matches what we expect
-    if (!id || type !== 'public-key') {
-      return NextResponse.json(
-        { success: false, error: 'Invalid credential' },
-        { status: 400 }
-      );
+    // For testing, still accept simulated credentials
+    if (credential.id === 'simulated-credential-id') {
+      console.log('Accepting simulated credential for testing');
+
+      // Set session cookies
+      cookieStore.set('session', 'authenticated', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 24 * 60 * 60, // 24 hours
+      });
+
+      // Clear the challenge
+      cookieStore.delete('auth_challenge');
+
+      console.log('Authentication successful (simulation)');
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Authentication successful (simulation mode)'
+      });
     }
 
-    // Here you would typically:
-    // 1. Verify the credential against stored credentials
-    // 2. Verify the challenge response
-    // 3. Check the signature
-    // For now, we'll just verify the challenge exists and clear it
+    // Process real WebAuthn credentials
+    try {
+      console.log('Processing WebAuthn credential');
+      
+      // For demonstration purposes, we'll accept any credential
+      // In a production app, you would properly verify against stored credentials
+      
+      console.log('Credential ID:', credential.id);
+      console.log('Credential type:', credential.type);
+      
+      if (!credential.id || !credential.response) {
+        throw new Error('Invalid credential format');
+      }
+      
+      // For demonstration, we'll consider the credential valid if it has the right properties
+      console.log('WebAuthn credential format looks valid');
+      
+      // Clear the challenge
+      cookieStore.delete('auth_challenge');
 
-    // Clear the challenge cookie
-    cookieStore.delete('auth_challenge');
+      // Set session cookies
+      cookieStore.set('session', 'authenticated', {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 24 * 60 * 60, // 24 hours
+      });
 
-    // Set the session cookie
-    cookieStore.set('session', 'authenticated', {
-      httpOnly: true,
-      secure: process.env.NODE_ENV === 'production',
-      sameSite: 'strict',
-      maxAge: 7 * 24 * 60 * 60 // 1 week
-    });
-
-    return NextResponse.json({ success: true });
+      return NextResponse.json({ 
+        success: true, 
+        message: 'Authentication successful'
+      });
+    } catch (verifyError) {
+      console.error('WebAuthn verification error:', verifyError);
+      return NextResponse.json({ 
+        success: false, 
+        error: 'WebAuthn verification failed: ' + (verifyError instanceof Error ? verifyError.message : String(verifyError))
+      }, { status: 400 });
+    }
+    
   } catch (error) {
     console.error('Error verifying credential:', error);
     return NextResponse.json(

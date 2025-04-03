@@ -5,16 +5,8 @@ import crypto from 'crypto';
 export async function GET() {
   try {
     const cookieStore = cookies();
-    const walletAddress = cookieStore.get('walletAddress')?.value;
-
-    if (!walletAddress) {
-      return NextResponse.json(
-        { success: false, error: 'No wallet found' },
-        { status: 401 }
-      );
-    }
-
-    // Generate a random challenge
+    
+    //TODO: Replace this random challenge with a challenge from the user's wallet
     const challenge = crypto.randomBytes(32);
     
     // Store the challenge in a cookie for verification

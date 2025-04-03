@@ -38,7 +38,7 @@ export default function WalletDashboard() {
 
   const fetchWalletInfo = async () => {
     try {
-      const response = await fetch('/', {
+      const response = await fetch('/api/wallet/check', {
         method: 'GET',
         headers: {
           'Accept': 'application/json'
@@ -54,7 +54,20 @@ export default function WalletDashboard() {
       }
 
       const data = await response.json();
-      setWalletInfo(data.wallet);
+      
+      // Extract data from the wallet check endpoint
+      if (data.walletAddress) {
+        setWalletInfo({
+          address: data.walletAddress,
+          ethBalance: "0", // We'll need to implement getting the balance
+          chain: {
+            name: "Base Sepolia",
+            id: 84532
+          }
+        });
+      } else {
+        throw new Error('No wallet found');
+      }
     } catch (err) {
       console.error('Error fetching wallet info:', err);
       setError('Failed to load wallet information');

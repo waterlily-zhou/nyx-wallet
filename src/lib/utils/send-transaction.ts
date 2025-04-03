@@ -1,40 +1,42 @@
-import * as dotenv from 'dotenv';
-import { initializeSafeClients } from '@/lib/client-setup';
-import { sendEthTransaction } from '@/lib/utils/transaction-utils';
-import type { Address } from 'viem';
-
-// Load environment variables
-dotenv.config();
+import { parseEther } from 'viem';
+import type { Address, SendTransactionParameters } from 'viem';
+import type { SmartAccountClient } from 'permissionless';
+import { baseSepolia } from 'viem/chains';
 
 /**
- * Function to send a transaction using your AA wallet
- * @param recipient The recipient address
- * @param amount The amount in ETH
- * @returns The transaction hash
+ * Send an ETH transaction using a smart account
+ * This function is compatible with the SmartAccountClient from permissionless.js
  */
-export async function sendTransaction(recipient: Address, amount: string): Promise<`0x${string}`> {
+export async function sendEthTransaction(
+    smartAccountClient: SmartAccountClient,
+    recipient: Address,
+    amount: string
+): Promise<`0x${string}`> {
+    // Parse the amount to wei
+    const valueInWei = parseEther(amount);
     try {
-        // Initialize all necessary clients and accounts
-        const { smartAccountClient } = await initializeSafeClients();
-
-        // Send the transaction using the utility function
-        const hash = await sendEthTransaction(smartAccountClient, recipient, amount);
+        console.log(`🚀 Sending ${amount} ETH to ${recipient}...`);
+        
+        // Check if account is defined
+        if (!smartAccountClient.account) {
+            throw new Error('Smart account client has no account configured');
+        }
+        
+        // Send the transaction
+        const txParams: SendTransactionParameters = {
+            account: smartAccountClient.account.address as Address,
+            chain: baseSepolia,
+            to: recipient,
+            value: valueInWei,
+            data: '0x',
+        };
+        const hash = await smartAccountClient.sendTransaction(txParams);
+        console.log(`✅ Transaction sent! User operation hash: ${hash}`);
+        console.log(`🔍 Track on JiffyScan: https://jiffyscan.xyz/userOpHash/${hash}?network=sepolia`);
         return hash;
     }
     catch (error) {
-        console.error('❌ Error in transaction process:', error);
+        console.error('❌ Error sending transaction:', error);
         throw error;
     }
-}
-
-// Example usage
-const recipientAddress = "0xd8da6bf26964af9d7eed9e03e53415d37aa96045" as const; // vitalik.eth
-const amountInEth = "0.000001"; // Very small amount to test with
-
-sendTransaction(recipientAddress, amountInEth)
-    .then((hash) => {
-        console.log('✅ Transaction process complete');
-    })
-    .catch((error) => {
-        console.error('❌ Transaction failed');
-    }); 
+} 
