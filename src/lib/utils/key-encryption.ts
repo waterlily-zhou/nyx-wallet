@@ -1,9 +1,11 @@
-import { randomBytes, createCipheriv, createDecipheriv, createHash } from 'crypto';
+import { randomBytes, createCipheriv, createDecipheriv, createHash, scrypt, scryptSync } from 'crypto';
 import { type Hex } from 'viem';
 import { EncryptedKey } from '../types/credentials';
 
 // You should store this in an environment variable
 const MASTER_KEY = process.env.KEY_ENCRYPTION_KEY || 'default-encryption-key-change-in-production';
+// Additional salt for server-side key encryption
+const SERVER_KEY_SALT = process.env.SERVER_KEY_SALT || 'server-key-salt-change-in-production';
 
 // Generate a random private key
 export function generateRandomPrivateKey(): Hex {
@@ -57,6 +59,74 @@ export function decryptData(encryptedData: EncryptedKey): string {
   } catch (error) {
     console.error('Decryption error:', error);
     throw new Error('Failed to decrypt data');
+  }
+}
+
+// Stronger encryption specifically for server keys
+export function encryptServerKey(serverKey: Hex): EncryptedKey {
+  try {
+    // Generate a random salt or use stored one
+    const salt = Buffer.from(SERVER_KEY_SALT, 'utf-8');
+    
+    // Derive a stronger key using scrypt (more resistant to brute force)
+    const derivedKey = scryptSync(MASTER_KEY, salt, 32);
+    
+    // Generate a random IV
+    const iv = randomBytes(16);
+    
+    // Create cipher with AES-GCM
+    const cipher = createCipheriv('aes-256-gcm', derivedKey, iv);
+    
+    // Encrypt the data
+    let encrypted = cipher.update(serverKey, 'utf8', 'base64');
+    encrypted += cipher.final('base64');
+    
+    // Get the auth tag
+    const tag = cipher.getAuthTag().toString('base64');
+    
+    return {
+      iv: iv.toString('base64'),
+      data: encrypted,
+      tag,
+      algorithm: 'AES-256-GCM-SCRYPT',
+      salt: salt.toString('base64')
+    };
+  } catch (error) {
+    console.error('Server key encryption error:', error);
+    throw new Error('Failed to encrypt server key');
+  }
+}
+
+// Decrypt server key with stronger protection
+export function decryptServerKey(encryptedKey: EncryptedKey): Hex {
+  try {
+    // Get the salt (or use default if not present)
+    const salt = encryptedKey.salt 
+      ? Buffer.from(encryptedKey.salt, 'base64')
+      : Buffer.from(SERVER_KEY_SALT, 'utf-8');
+    
+    // Derive the key using the same parameters
+    const derivedKey = scryptSync(MASTER_KEY, salt, 32);
+    
+    // Get the IV
+    const iv = Buffer.from(encryptedKey.iv, 'base64');
+    
+    // Create decipher
+    const decipher = createDecipheriv('aes-256-gcm', derivedKey, iv);
+    
+    // Set auth tag
+    if (encryptedKey.tag) {
+      decipher.setAuthTag(Buffer.from(encryptedKey.tag, 'base64'));
+    }
+    
+    // Decrypt
+    let decrypted = decipher.update(encryptedKey.data, 'base64', 'utf8');
+    decrypted += decipher.final('utf8');
+    
+    return decrypted as Hex;
+  } catch (error) {
+    console.error('Server key decryption error:', error);
+    throw new Error('Failed to decrypt server key');
   }
 }
 

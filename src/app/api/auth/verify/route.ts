@@ -4,7 +4,11 @@ import { findUserById, findUserByWalletAddress } from '@/lib/utils/user-store';
 
 // WebAuthn settings
 const rpID = process.env.RP_ID || 'localhost';
-const expectedOrigin = process.env.ORIGIN || `http://${rpID}:3000`;
+// Allow verification from any port in development
+const expectedOrigin = process.env.ORIGIN || 
+  (process.env.NODE_ENV === 'production' 
+    ? `https://${rpID}` 
+    : `http://${rpID}`);
 
 export async function POST(request: NextRequest) {
   try {
@@ -38,34 +42,18 @@ export async function POST(request: NextRequest) {
 
     // For testing, still accept simulated credentials
     if (credential.id === 'simulated-credential-id') {
-      console.log('Accepting simulated credential for testing');
-
-      // Set session cookies
-      cookieStore.set('session', 'authenticated', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 24 * 60 * 60, // 24 hours
-      });
-
-      // Clear the challenge
-      cookieStore.delete('auth_challenge');
-
-      console.log('Authentication successful (simulation)');
+      console.log('API: Rejecting simulated credential - real SCA required');
       return NextResponse.json({ 
-        success: true, 
-        message: 'Authentication successful (simulation mode)'
-      });
+        success: false, 
+        error: 'Simulated credentials are not allowed. Must use real biometric authentication.' 
+      }, { status: 400 });
     }
 
     // Process real WebAuthn credentials
     try {
       console.log('Processing WebAuthn credential');
       
-      // For demonstration purposes, we'll accept any credential
-      // In a production app, you would properly verify against stored credentials
-      
+      // Get credential metadata
       console.log('Credential ID:', credential.id);
       console.log('Credential type:', credential.type);
       
@@ -73,7 +61,16 @@ export async function POST(request: NextRequest) {
         throw new Error('Invalid credential format');
       }
       
-      // For demonstration, we'll consider the credential valid if it has the right properties
+      // Extract the origin from the credential
+      const credentialDataJson = Buffer.from(credential.response.clientDataJSON, 'base64').toString();
+      const credentialData = JSON.parse(credentialDataJson);
+      const actualOrigin = credentialData.origin;
+      
+      console.log('API: Expected origin (from config):', expectedOrigin);
+      console.log('API: Actual origin (from credential):', actualOrigin);
+      
+      // In a real implementation, you'd verify the credential against stored authenticators
+      // For now, consider the credential valid based on format
       console.log('WebAuthn credential format looks valid');
       
       // Clear the challenge

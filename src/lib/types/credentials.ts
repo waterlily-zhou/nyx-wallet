@@ -13,6 +13,7 @@ export interface EncryptedKey {
   data: string;                // Encrypted data (Base64)
   tag?: string;                // Auth tag for GCM mode (Base64)
   algorithm: string;           // Algorithm identifier
+  salt?: string;               // Salt for key derivation (Base64)
 }
 
 export interface UserKeys {

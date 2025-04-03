@@ -836,5 +836,86 @@
     "authenticators": [],
     "credentials": [],
     "createdAt": "2025-04-03T15:50:37.669Z"
+  },
+  {
+    "id": "9cb7a5d1cc81e34baf190275d99f8fa4",
+    "username": "user_1743708557088",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:29:18.113Z"
+  },
+  {
+    "id": "e6b8a9567fc46be34c948927e62a8929",
+    "username": "user_1743709041106",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:37:22.957Z"
+  },
+  {
+    "id": "d261f6f6326d45fb58f234cd23b59b7e",
+    "username": "user_1743709274660",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:41:16.319Z"
+  },
+  {
+    "id": "6ee7400f1c8e9d56153163774a2565ff",
+    "username": "user_1743709399999",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:43:21.821Z"
+  },
+  {
+    "id": "c479d90e3d1b5cac84df91b4507ddf4d",
+    "username": "user_1743709676851",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:47:58.825Z",
+    "serverKey": {
+      "iv": "OZLaolWb9F0+Pr2X/MXy9Q==",
+      "data": "Md2eetwbI7nK3C20i93MhCAW8WURhJyNGCA5Jk8jYqf7tpU60vxTOL+cuFPcMhUfcBGUWMpWX36Skv566riCvhAH",
+      "tag": "LvoDCnjTbI5kqve6wuRo7A==",
+      "algorithm": "AES-256-GCM-SCRYPT",
+      "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
+    },
+    "recoveryKeyHash": "b25a7785e9ed08e9c45afed7f1ffbfcf04cc7e9dd278e91be204b45a6ff3bd57"
+  },
+  {
+    "id": "d70a161650aa968500518faf9d73185e",
+    "username": "user_1743709977467",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:52:59.088Z",
+    "serverKey": {
+      "iv": "2l75DjJ2OcGkQ4NbDRMJdQ==",
+      "data": "Xr7rPHuinpY2p3MDLCzBaZtffrAc7G+xazZxTTl5etj+ZJYqHYXMGEje5EztvJ/l+4Vh+k68G1SkwKMb/q1Ly+4Q",
+      "tag": "dVfeDr81OytfO8qtqD8EkQ==",
+      "algorithm": "AES-256-GCM-SCRYPT",
+      "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
+    },
+    "recoveryKeyHash": "58cb0e5eed40765202c588699ba649d3c2bf4dc70cfbacc0beb57e002554bf39"
+  },
+  {
+    "id": "c565be1798fb41092dacabd9b60a23cf",
+    "username": "user_1743710105551",
+    "authType": "biometric",
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": "2025-04-03T19:55:07.144Z",
+    "serverKey": {
+      "iv": "Fw7g7EWNyy7ufGmlb4yIJA==",
+      "data": "iLjFLAnHvAha9rorJs63gtFna8BYrT39rCliZttHH0MQ2A2IeTELwSv/wFzHd7C+xRTC9OjLziTNmTjp0sh5eDIx",
+      "tag": "AlvLFpyMGLc+wGbHO5wlLQ==",
+      "algorithm": "AES-256-GCM-SCRYPT",
+      "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
+    },
+    "recoveryKeyHash": "19cfc8fb1918f2cfb8f4e1b9a212ef84784b36b8037c64ac61afdec358affa64",
+    "walletAddress": "0x31e3dbc7dec7982bd7f97719b3019a8e29062afa"
   }
 ]

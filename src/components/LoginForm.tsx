@@ -53,53 +53,17 @@ export default function LoginForm() {
       const defaultUsername = `user_${Date.now()}`;
       console.log('Using default username:', defaultUsername);
       
-      // Try WebAuthn registration with DKG first
-      try {
-        const result = await register({ username: defaultUsername });
-        console.log('Registration result:', result);
-        
-        if (result.success) {
-          // Registration successful, will be handled in the useEffect
-          return;
-        }
-        
-        // If we get here, registration failed but didn't throw an error
-        console.log('WebAuthn registration failed, falling back to simple wallet');
-      } catch (webAuthnError) {
-        // WebAuthn registration failed with an error
-        console.error('WebAuthn registration error:', webAuthnError);
-        console.log('Falling back to simple wallet creation');
+      // Use WebAuthn registration with DKG
+      const result = await register({ username: defaultUsername });
+      console.log('Registration result:', result);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Failed to create wallet');
       }
       
-      // Fallback: create a simple wallet without WebAuthn
-      const fallbackResponse = await fetch('/api/wallet/create-simple', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ username: defaultUsername }),
-      });
+      // Registration result will be handled in the useEffect
+      // It will display the recovery key to the user
       
-      if (!fallbackResponse.ok) {
-        const errorData = await fallbackResponse.json();
-        throw new Error(errorData.error || 'Failed to create wallet');
-      }
-      
-      const fallbackResult = await fallbackResponse.json();
-      
-      if (!fallbackResult.success) {
-        throw new Error(fallbackResult.error || 'Failed to create wallet');
-      }
-      
-      // If fallback was successful, use the data
-      if (fallbackResult.recoveryKey) {
-        setRecoveryKey(fallbackResult.recoveryKey);
-        setWalletAddress(fallbackResult.walletAddress || null);
-        setShowRecoveryKey(true);
-      } else {
-        // No recovery key but creation was successful, just go to dashboard
-        router.push('/');
-      }
     } catch (err) {
       console.error('Wallet creation error:', err);
       setError(err instanceof Error ? err.message : 'Failed to create wallet');

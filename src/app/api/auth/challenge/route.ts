@@ -6,8 +6,11 @@ export async function GET() {
   try {
     const cookieStore = cookies();
     
-    //TODO: Replace this random challenge with a challenge from the user's wallet
+    // Generate a random challenge
     const challenge = crypto.randomBytes(32);
+    
+    // Convert to array for the client
+    const challengeArray = Array.from(challenge);
     
     // Store the challenge in a cookie for verification
     cookieStore.set('auth_challenge', challenge.toString('base64'), {
@@ -19,7 +22,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      challenge: Array.from(challenge)
+      challenge: challengeArray
     });
   } catch (error) {
     console.error('Error generating challenge:', error);
