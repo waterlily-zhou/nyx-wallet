@@ -159,6 +159,16 @@ export async function POST(request: NextRequest) {
         });
       } catch (scaError) {
         console.error('API: Error creating Smart Contract Account:', scaError);
+        // Create detailed error response with helpful diagnostics
+        const errorDetails = {
+          message: scaError instanceof Error ? scaError.message : String(scaError),
+          stack: scaError instanceof Error ? scaError.stack : undefined,
+          type: 'smart_account_creation_error'
+        };
+        
+        // Log detailed error information for debugging
+        console.error('API: SCA creation error details:', JSON.stringify(errorDetails));
+        
         throw new Error(`Failed to create Smart Contract Account: ${scaError instanceof Error ? scaError.message : String(scaError)}`);
       }
     } catch (verifyError) {

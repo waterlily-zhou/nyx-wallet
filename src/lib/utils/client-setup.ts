@@ -1,18 +1,8 @@
 import { type Address, type Hex, createPublicClient as viemCreatePublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
 import { privateKeyToAccount } from 'viem/accounts';
-
-// Constants
-export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789';
-
-// Types
-export interface ClientSetup {
-  publicClient: ReturnType<typeof viemCreatePublicClient>;
-  pimlicoClient: any;
-  owner: ReturnType<typeof privateKeyToAccount>;
-  smartAccount: any;
-  smartAccountClient: any;
-}
+// Import constants and shared types from shared-types.ts
+import { ENTRY_POINT_ADDRESS, ClientSetup } from './shared-types';
 
 // Get the active chain configuration
 export function getActiveChain() {
@@ -43,8 +33,25 @@ export function createPimlicoClientInstance(apiKey: string) {
     const bundlerUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${apiKey}`;
     
     // We're using dynamic imports to avoid typing issues
-    const permissionless = require('permissionless');
-    const { createPimlicoClient } = require('permissionless/clients/pimlico');
+    let permissionless;
+    try {
+      permissionless = require('permissionless');
+    } catch (e) {
+      console.error('Failed to load permissionless module:', e);
+      throw new Error('Failed to load permissionless module');
+    }
+    
+    let createPimlicoClient;
+    try {
+      createPimlicoClient = permissionless.clients?.pimlico?.createPimlicoClient;
+      
+      if (!createPimlicoClient) {
+        createPimlicoClient = require('permissionless/clients/pimlico').createPimlicoClient;
+      }
+    } catch (e) {
+      console.error('Failed to load createPimlicoClient:', e);
+      throw new Error('Failed to load createPimlicoClient function');
+    }
     
     // Create pimlico client
     const pimlicoClient = createPimlicoClient({
@@ -65,15 +72,43 @@ export async function createSafeSmartAccount(publicClient: ReturnType<typeof vie
     console.log('Creating Safe Smart Account for address:', owner.address);
     
     // Use dynamic imports with proper error handling for different module formats
-    const permissionless = require('permissionless');
+    let permissionless;
+    try {
+      permissionless = require('permissionless');
+    } catch (e) {
+      console.error('Failed to load permissionless module:', e);
+      throw new Error('Failed to load permissionless module');
+    }
     
     // Check if accounts exists and how it's structured
     let safeAccountFn;
-    if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
-      safeAccountFn = permissionless.accounts.toSafeSmartAccount;
-    } else if (permissionless.toSafeSmartAccount) {
-      safeAccountFn = permissionless.toSafeSmartAccount;
-    } else {
+    
+    // Try different module paths to find toSafeSmartAccount
+    try {
+      if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
+        safeAccountFn = permissionless.accounts.toSafeSmartAccount;
+      } else if (permissionless.toSafeSmartAccount) {
+        safeAccountFn = permissionless.toSafeSmartAccount;
+      } else if (permissionless.accounts && permissionless.accounts.safeAccount) {
+        safeAccountFn = permissionless.accounts.safeAccount;
+      } else {
+        // Try to import it directly
+        try {
+          const accountsModule = require('permissionless/accounts');
+          if (accountsModule.toSafeSmartAccount) {
+            safeAccountFn = accountsModule.toSafeSmartAccount;
+          } else if (accountsModule.safeAccount) {
+            safeAccountFn = accountsModule.safeAccount;
+          }
+        } catch (importError) {
+          console.error('Error importing permissionless/accounts:', importError);
+        }
+      }
+    } catch (e) {
+      console.error('Error finding toSafeSmartAccount function:', e);
+    }
+    
+    if (!safeAccountFn) {
       throw new Error('toSafeSmartAccount function not found in permissionless library');
     }
     
@@ -107,8 +142,32 @@ export function createSmartAccountClientWithPaymaster(
   paymasterUrl: string
 ) {
   try {
-    // We're using dynamic imports to avoid typing issues
-    const { createSmartAccountClient } = require('permissionless');
+    // We're using dynamic imports with better error handling
+    let permissionless;
+    try {
+      permissionless = require('permissionless');
+    } catch (e) {
+      console.error('Failed to load permissionless module:', e);
+      throw new Error('Failed to load permissionless module');
+    }
+    
+    let createSmartAccountClient;
+    try {
+      createSmartAccountClient = permissionless.createSmartAccountClient;
+      
+      if (!createSmartAccountClient) {
+        // Try to import it directly
+        try {
+          createSmartAccountClient = require('permissionless/accounts').createSmartAccountClient;
+        } catch (importError) {
+          console.error('Error importing createSmartAccountClient:', importError);
+          throw new Error('Failed to find createSmartAccountClient function');
+        }
+      }
+    } catch (e) {
+      console.error('Error finding createSmartAccountClient function:', e);
+      throw new Error('Failed to find createSmartAccountClient function');
+    }
     
     // Create smart account client
     const smartAccountClient = createSmartAccountClient({

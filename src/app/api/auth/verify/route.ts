@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { findUserById, findUserByWalletAddress } from '@/lib/utils/user-store';
+import { type Address } from 'viem';
 
 // WebAuthn settings
 const rpID = process.env.RP_ID || 'localhost';
@@ -12,16 +13,16 @@ const expectedOrigin = process.env.ORIGIN ||
 
 export async function POST(request: NextRequest) {
   try {
-    console.log('Verify endpoint called');
+    console.log('API: Verify endpoint called');
     const cookieStore = cookies();
     const storedChallenge = cookieStore.get('auth_challenge')?.value;
     const walletAddress = cookieStore.get('walletAddress')?.value;
     
-    console.log('Stored challenge:', storedChallenge ? 'exists' : 'missing');
-    console.log('Wallet address:', walletAddress ? walletAddress : 'missing');
+    console.log('API: Stored challenge:', storedChallenge ? `${storedChallenge.substring(0, 10)}...` : 'missing');
+    console.log('API: Wallet address:', walletAddress ? walletAddress : 'missing');
 
     if (!storedChallenge) {
-      console.log('No authentication challenge found');
+      console.log('API: No authentication challenge found');
       return NextResponse.json({ 
         success: false, 
         error: 'No authentication challenge found'
@@ -73,6 +74,10 @@ export async function POST(request: NextRequest) {
       // For now, consider the credential valid based on format
       console.log('WebAuthn credential format looks valid');
       
+      // WebAuthn verification success - Try to find the user by wallet address
+      const user = walletAddress ? findUserByWalletAddress(walletAddress as Address) : undefined;
+      const userId = user ? user.id : 'test_user'; // Fallback to test_user if not found
+
       // Clear the challenge
       cookieStore.delete('auth_challenge');
 
@@ -85,8 +90,18 @@ export async function POST(request: NextRequest) {
         maxAge: 24 * 60 * 60, // 24 hours
       });
 
+      // Set userId cookie
+      cookieStore.set('userId', userId, {
+        httpOnly: true,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'strict',
+        path: '/',
+        maxAge: 24 * 60 * 60, // 24 hours
+      });
+
       return NextResponse.json({ 
         success: true, 
+        userId,
         message: 'Authentication successful'
       });
     } catch (verifyError) {

@@ -2,6 +2,12 @@
 
 import { useState, useEffect } from 'react';
 
+interface AuthenticationResult {
+  success: boolean;
+  userId?: string;
+  error?: string;
+}
+
 export function useBiometricAuth() {
   const [isBiometricsAvailable, setIsBiometricsAvailable] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -28,7 +34,7 @@ export function useBiometricAuth() {
     checkBiometricsAvailability();
   }, []);
 
-  const authenticateWithBiometrics = async (challenge: string): Promise<boolean> => {
+  const authenticateWithBiometrics = async (challenge: string): Promise<AuthenticationResult> => {
     try {
       console.log('Starting authentication process...');
       setError(null);
@@ -36,7 +42,13 @@ export function useBiometricAuth() {
       if (!isBiometricsAvailable) {
         console.error('Biometrics not available');
         setError('Biometrics not available');
-        return false;
+        return { success: false, error: 'Biometrics not available' };
+      }
+
+      // Make sure the challenge is a string
+      if (!challenge || typeof challenge !== 'string') {
+        console.error('Invalid challenge format:', challenge);
+        return { success: false, error: 'Invalid challenge format' };
       }
 
       console.log('Challenge received:', challenge.substring(0, 10) + '...');
@@ -62,7 +74,7 @@ export function useBiometricAuth() {
       const credential = await navigator.credentials.get(options);
       
       if (!credential) {
-        throw new Error('No credential received');
+        return { success: false, error: 'No credential received' };
       }
 
       // Get the credential as PublicKeyCredential
@@ -102,12 +114,23 @@ export function useBiometricAuth() {
       const result = await verifyResponse.json();
       console.log('Verify response body:', result);
       
-      return result.success;
+      if (result.success) {
+        return { 
+          success: true, 
+          userId: result.userId || 'test_user'  // Use the userId from the server or fallback to test_user
+        };
+      } else {
+        return { 
+          success: false, 
+          error: result.error || 'Authentication failed'
+        };
+      }
 
     } catch (error) {
       console.error('Biometric authentication error:', error);
-      setError(error instanceof Error ? error.message : 'Unknown authentication error');
-      return false;
+      const errorMessage = error instanceof Error ? error.message : 'Unknown authentication error';
+      setError(errorMessage);
+      return { success: false, error: errorMessage };
     }
   };
 

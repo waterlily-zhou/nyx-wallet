@@ -4,16 +4,20 @@ import crypto from 'crypto';
 
 export async function GET() {
   try {
+    console.log('API: Challenge endpoint called');
+    
     const cookieStore = cookies();
     
     // Generate a random challenge
     const challenge = crypto.randomBytes(32);
     
-    // Convert to array for the client
-    const challengeArray = Array.from(challenge);
+    // Convert to base64 string for the client
+    const challengeBase64 = challenge.toString('base64');
+    
+    console.log('API: Generated challenge with length:', challengeBase64.length);
     
     // Store the challenge in a cookie for verification
-    cookieStore.set('auth_challenge', challenge.toString('base64'), {
+    cookieStore.set('auth_challenge', challengeBase64, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -22,7 +26,7 @@ export async function GET() {
 
     return NextResponse.json({
       success: true,
-      challenge: challengeArray
+      challenge: challengeBase64
     });
   } catch (error) {
     console.error('Error generating challenge:', error);

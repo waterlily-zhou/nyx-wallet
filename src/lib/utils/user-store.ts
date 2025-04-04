@@ -1,28 +1,25 @@
 import { randomBytes, createHash } from 'crypto';
 import { privateKeyToAccount } from 'viem/accounts';
-import { type Address, type Hex } from 'viem';
-import { toSafeSmartAccount } from 'permissionless/accounts';
-import { createPublicClient, http } from 'viem';
+import { type Address, type Hex, createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
-import { ENTRY_POINT_ADDRESS, getActiveChain, createPublicClient as createChainPublicClient, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createPimlicoClientInstance, type ClientSetup } from './client-setup';
+// Import the ClientSetup type from shared-types
+import { ClientSetup, ENTRY_POINT_ADDRESS } from './shared-types';
 import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import crypto from 'crypto';
 import fs from 'fs';
 import path from 'path';
-import { createPublicClient as viemCreatePublicClient } from 'viem';
 import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys, hashRecoveryKey, encryptServerKey, decryptServerKey } from './key-encryption';
-import { Authenticator, EncryptedKey, AuthenticatorDevice } from '../types/credentials';
+import { Authenticator, EncryptedKey, AuthenticatorDevice, Wallet } from '../types/credentials';
 
-// WebAuthn settings
+// Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
 export const rpID = process.env.RP_ID || 'localhost';
 // Use a less strict origin expectation for development, supporting multiple ports
-export const origin = process.env.ORIGIN || 
-  (process.env.NODE_ENV === 'production' 
-    ? `https://${rpID}` 
-    : `http://${rpID}`);
+export const origin = process.env.NODE_ENV === 'production' 
+  ? `https://${rpID}` 
+  : `http://${rpID}`;
 
 // Storage file path
 const DATA_DIR = path.join(process.cwd(), 'data');
@@ -33,14 +30,16 @@ const AUTHENTICATORS_FILE = path.join(DATA_DIR, 'authenticators.json');
 export interface UserAccount {
   id: string;
   username: string;
-  walletAddress?: Address;
-  privateKey?: Hex;
-  authType: 'biometric' | 'social' | 'direct';
-  authenticators?: Authenticator[];
-  credentials?: any[];
-  createdAt: Date;
+  walletAddress?: Address; // Deprecated: Keep for backward compatibility
+  wallets: Wallet[];        // New: Array of wallet addresses
+  biometricKey?: string;    // encrypted private key for biometric auth
+  socialKey?: string;       // encrypted private key for social auth
+  createdAt: number;
   serverKey?: string | EncryptedKey;
   recoveryKeyHash?: string;
+  authType?: 'biometric' | 'social' | 'direct';
+  authenticators?: Authenticator[];
+  credentials?: any[];
 }
 
 // Types for distributed key management
@@ -75,6 +74,35 @@ export function initializeStorage(): void {
   console.log(`Loaded ${authenticatorDevices.length} authenticator devices from storage`);
 }
 
+// Create a test user for development
+function createTestUser() {
+  // Create basic user
+  const userId = `test_user_${Date.now()}`;
+  const testUser = {
+    id: userId,
+    username: 'test_user',
+    authType: 'biometric' as const,
+    wallets: [], // Initialize empty wallets array
+    authenticators: [],
+    credentials: [],
+    createdAt: new Date().getTime()
+  } as UserAccount;
+  
+  // serverKey is required for wallet creation
+  testUser.serverKey = encryptPrivateKey(
+    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
+    process.env.KEY_ENCRYPTION_KEY || 'default_key'
+  );
+  
+  // Add the user to the users array
+  userAccounts.push(testUser);
+  
+  // Save user data
+  saveUserData();
+  
+  return testUser;
+}
+
 // Load user data from storage
 function loadUserData(): void {
   try {
@@ -84,23 +112,40 @@ function loadUserData(): void {
       const data = fs.readFileSync(USERS_FILE, 'utf8');
       const parsedData = JSON.parse(data);
       
-      // Convert ISO date strings back to Date objects
-      userAccounts = parsedData.map((user: any) => ({
-        ...user,
-        createdAt: new Date(user.createdAt)
-      }));
+      // Convert ISO date strings back to Date objects and ensure wallets array exists
+      userAccounts = parsedData.map((user: any) => {
+        // Ensure wallets array exists
+        if (!Array.isArray(user.wallets)) {
+          user.wallets = [];
+          
+          // If there's a legacy walletAddress, add it as a wallet
+          if (user.walletAddress) {
+            user.wallets.push({
+              address: user.walletAddress,
+              name: 'Primary Wallet',
+              chainId: 11155111, // Sepolia
+              isDefault: true,
+              createdAt: typeof user.createdAt === 'string' 
+                ? new Date(user.createdAt).getTime() 
+                : user.createdAt
+            });
+          }
+        }
+        
+        return {
+          ...user,
+          createdAt: typeof user.createdAt === 'string' 
+            ? new Date(user.createdAt).getTime() 
+            : user.createdAt
+        };
+      });
     } else {
       console.log('No user data file found, starting with empty user accounts');
       userAccounts = [];
       
       // Create a test user for development
       if (process.env.NODE_ENV !== 'production') {
-        const testUser = createUser('test_user', 'biometric');
-        testUser.serverKey = encryptPrivateKey(
-          '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
-          process.env.KEY_ENCRYPTION_KEY || 'default_key'
-        );
-        saveUserData();
+        createTestUser();
       }
     }
   } catch (error) {
@@ -109,12 +154,7 @@ function loadUserData(): void {
     
     // Create a test user for development
     if (process.env.NODE_ENV !== 'production') {
-      const testUser = createUser('test_user', 'biometric');
-      testUser.serverKey = encryptPrivateKey(
-        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
-        process.env.KEY_ENCRYPTION_KEY || 'default_key'
-      );
-      saveUserData();
+      createTestUser();
     }
   }
 }
@@ -213,166 +253,141 @@ export async function createSmartAccountFromPrivateKey(privateKey: Hex): Promise
 }> {
   const owner = privateKeyToAccount(privateKey);
   
-  // Use the chain-agnostic public client instead of hardcoding Sepolia
-  const publicClient = createChainPublicClient();
-  
-  // Log which chain we're using for account creation
-  const activeChain = getActiveChain();
-  console.log(`Creating smart account on ${activeChain.chain.name} chain`);
-  
-  const smartAccount = await toSafeSmartAccount({
-    client: publicClient,
-    owners: [owner],
-    entryPoint: {
-      address: ENTRY_POINT_ADDRESS,
-      version: "0.6",
-    },
-    version: "1.4.1",
+  // Create a public client
+  const publicClient = createPublicClient({
+    chain: sepolia,
+    transport: http()
   });
   
-  return {
-    address: smartAccount.address,
-    privateKey
-  };
+  // Log which chain we're using for account creation
+  console.log(`Creating smart account on Sepolia chain`);
+  
+  // Import toSafeSmartAccount directly to avoid circular dependencies
+  try {
+    const permissionless = require('permissionless');
+    let toSafeSmartAccountFn;
+    
+    if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
+      toSafeSmartAccountFn = permissionless.accounts.toSafeSmartAccount;
+    } else if (permissionless.toSafeSmartAccount) {
+      toSafeSmartAccountFn = permissionless.toSafeSmartAccount;
+    } else {
+      throw new Error('toSafeSmartAccount function not found');
+    }
+    
+    const smartAccount = await toSafeSmartAccountFn({
+      client: publicClient,
+      owners: [owner],
+      entryPoint: {
+        address: ENTRY_POINT_ADDRESS,
+        version: "0.6",
+      },
+      safeVersion: "1.4.1",
+      chainId: sepolia.id,
+      saltNonce: 0n
+    });
+    
+    return {
+      address: smartAccount.address,
+      privateKey
+    };
+  } catch (error) {
+    console.error('Error creating Smart Account:', error);
+    throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 //* SIGNER 2: BIOMETRICS -> SCA
 // Create a smart account from biometric or social credentials
 export async function createSmartAccountFromCredential(
   userId: string, 
-  authType: 'biometric' | 'social'
+  authType: 'biometric' | 'social',
+  salt: string = '' // Optional salt parameter for creating different wallets
 ): Promise<{
   address: Address;
   privateKey: Hex;
   clientSetup: ClientSetup;
 }> {
-  console.log(`Creating smart account for user ${userId} with ${authType} authentication`);
+  console.log(`Creating smart account for user ${userId} with ${authType} authentication${salt ? ' and salt: ' + salt : ''}`);
   
-  // Generate distributed keys
-  const { deviceKey, serverKey, recoveryKey } = generateDistributedKeys();
+  // Find the user
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error(`User ${userId} not found`);
+  }
   
-  // Store the keys securely
-  await storeKeys(userId, deviceKey, serverKey, recoveryKey);
+  // Get the private key based on auth type
+  let privateKey: Hex;
+  if (authType === 'biometric') {
+    if (!user.biometricKey) {
+      console.log(`User ${userId} doesn't have a biometric key. Generating a new one...`);
+      // Generate a new biometric key
+      privateKey = generateRandomPrivateKey();
+      // Encrypt and store it for future use
+      user.biometricKey = encryptPrivateKey(privateKey, userId);
+      updateUser(user);
+      console.log('New biometric key generated and stored.');
+    } else {
+      privateKey = decryptPrivateKey(user.biometricKey, userId);
+    }
+  } else {
+    if (!user.socialKey) {
+      console.log(`User ${userId} doesn't have a social key. Generating a new one...`);
+      // Generate a new social key
+      privateKey = generateRandomPrivateKey();
+      // Encrypt and store it for future use
+      user.socialKey = encryptPrivateKey(privateKey, userId);
+      updateUser(user);
+      console.log('New social key generated and stored.');
+    } else {
+      privateKey = decryptPrivateKey(user.socialKey, userId);
+    }
+  }
   
-  // Create a deterministic key from the combined device and server keys
-  const combinedKey = combineKeys(deviceKey, serverKey);
-  
-  // Create the owner account
-  const owner = privateKeyToAccount(combinedKey);
-  console.log(`Created owner account with address: ${owner.address}`);
+  // Generate a combined key that's unique to this user and auth method (with optional salt)
+  const combinedKey = generateCombinedKey(privateKey, userId, authType, salt);
   
   try {
-    // Initialize blockchain clients
-    const publicClient = createChainPublicClient();
-    const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
-    
-    // Create a safe smart account for the owner
-    console.log('Creating Smart Account...');
-    const smartAccount = await createSafeSmartAccount(publicClient, owner);
-    console.log(`Smart Account created with address: ${smartAccount.address}`);
-    
-    // Set up the smart account client with paymaster
-    const activeChain = getActiveChain();
-    const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY || ''}`;
-    
-    // Create the smart account client
-    const smartAccountClient = createSmartAccountClientWithPaymaster(
-      smartAccount,
-      pimlicoClient,
-      pimlicoUrl
-    );
-    
-    // Create the complete client setup
-    const clientSetup: ClientSetup = {
-      publicClient,
-      pimlicoClient,
-      owner,
-      smartAccount,
-      smartAccountClient
-    };
-    
-    console.log(`Smart Account setup completed for address: ${smartAccount.address}`);
-    
-    // Update the user with the wallet address
-    const user = findUserById(userId);
-    if (user) {
-      user.walletAddress = smartAccount.address;
-      updateUser(user);
-      console.log('User updated with wallet address');
-    }
-    
-    // Return the smart contract account info
-    return {
-      address: smartAccount.address,
-      privateKey: combinedKey,
-      clientSetup
-    };
-  } catch (error) {
-    console.error('Error creating Smart Account with permissionless:', error);
-    
-    // If there's an error with permissionless.js, use a direct SEPOLIA contract creation approach
-    console.log('Attempting alternative SCA creation method for Sepolia testnet...');
-
-    // Generate a deterministic counterfactual address based on the owner account
-    // This uses entropy from the user's key to create a real Sepolia address
-    // This is a temporary solution until the permissionless.js compatibility is resolved
-    
+    // Try the improved permissionless.js v2 implementation
     try {
-      // Create hash from owner address + random but deterministic salt
-      const salt = crypto.createHash('sha256').update(owner.address + userId).digest('hex');
+      console.log('Creating SCA with improved permissionless.js v2 implementation...');
       
-      // Get address using a direct approach with Sepolia
-      // We're just using a simplified method to generate the address deterministically
-      const publicClient = createChainPublicClient();
-      
-      // This is still a real Sepolia SCA address, just generated differently
-      // We could put actual contract code here to deploy the account, but for now
-      // we're just generating the address deterministically
-      const dummyNonce = BigInt(parseInt(salt.substring(0, 10), 16));
-      const walletAddress = `0x${crypto.createHash('sha256')
-        .update(owner.address + dummyNonce.toString())
-        .digest('hex')
-        .substring(0, 40)}` as Address;
-      
-      // Create a minimal smart account implementation
-      const smartAccount = {
-        address: walletAddress,
-        getNonce: async () => BigInt(0),
-        signMessage: async (message: any) => ({ hash: '0x0' as Hex }),
-        signTransaction: async (tx: any) => ({ hash: '0x0' as Hex }),
-        deploymentState: async () => 'undeployed',
-        execute: async () => ({ hash: '0x0' as Hex }),
-      };
-      
-      // Create client setup
-      const clientSetup: ClientSetup = {
-        publicClient,
-        pimlicoClient: null,
-        owner,
-        smartAccount,
-        smartAccountClient: null
-      };
-      
-      console.log(`Created alternate Smart Account with address: ${walletAddress}`);
-      
-      // Update the user with the wallet address
-      const user = findUserById(userId);
-      if (user) {
-        user.walletAddress = walletAddress;
-        updateUser(user);
-        console.log('User updated with wallet address');
+      // Try the JavaScript version first (more reliable with direct requires)
+      try {
+        const { createPermissionlessSCADirectJS } = require('./permissionless-js-direct');
+        return await createPermissionlessSCADirectJS(combinedKey);
+      } catch (jsError) {
+        console.log('JS implementation failed, trying TypeScript version...');
+        const { createPermissionlessSCAv2 } = await import('./permissionless-v2');
+        return await createPermissionlessSCAv2(combinedKey);
       }
+    } catch (v2Error) {
+      console.error('Error creating SCA with improved permissionless.js v2:', v2Error);
+      console.log('Falling back to direct Safe Smart Account implementation...');
       
-      // Return the smart contract account info
-      return {
-        address: walletAddress,
-        privateKey: combinedKey,
-        clientSetup
+      // If v2 fails, directly use the fallback implementation
+      // Define a function to update the user's wallet address
+      const updateUserWalletAddress = (id: string, address: Address) => {
+        const user = findUserById(id);
+        if (user) {
+          user.walletAddress = address;
+          updateUser(user);
+        }
       };
-    } catch (alternativeError) {
-      console.error('Failed to create alternative SCA:', alternativeError);
-      throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
+      
+      // Import the fallback implementation
+      const { createFallbackSmartAccount } = await import('./fallback-sca');
+      
+      // Create a real Smart Contract Account using our fallback implementation
+      return await createFallbackSmartAccount(
+        userId,
+        combinedKey,
+        updateUserWalletAddress
+      );
     }
+  } catch (error) {
+    console.error('All Smart Account creation methods failed:', error);
+    throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -392,7 +407,8 @@ export function findUserById(userId: string): UserAccount | undefined {
       id: userId,
       username: `test_${userId.substring(0, 5)}`,
       authType: 'biometric',
-      createdAt: new Date(),
+      createdAt: new Date().getTime(),
+      wallets: [], // Add missing wallets array
       serverKey: encryptPrivateKey(
         '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
         process.env.KEY_ENCRYPTION_KEY || 'default_key'
@@ -464,19 +480,18 @@ export function createUser(
   username: string,
   authType: 'biometric' | 'social' | 'direct',
   walletAddress?: Address,
-  privateKey?: Hex
 ): UserAccount {
-  const userId = randomBytes(16).toString('hex');
+  const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
   
   const user: UserAccount = {
     id: userId,
     username,
     authType,
     walletAddress,
-    privateKey,
+    wallets: [], // Initialize empty wallets array
     authenticators: [],
     credentials: [],
-    createdAt: new Date()
+    createdAt: new Date().getTime()
   };
   
   userAccounts.push(user);
@@ -596,27 +611,230 @@ export async function getSmartAccountClient(userId: string) {
   // Create the owner account
   const owner = privateKeyToAccount(combinedKey);
   
-  // Initialize blockchain clients
-  const publicClient = createChainPublicClient();
-  const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+  try {
+    // Initialize blockchain clients
+    const publicClient = createPublicClient({
+      chain: sepolia,
+      transport: http()
+    });
+    
+    // Try to import the permissionless.js dependencies
+    let createSafeSmartAccount;
+    let createPimlicoClient;
+    let createSmartAccountClient;
+    
+    try {
+      // Dynamic imports to avoid circular dependencies
+      const permissionless = require('permissionless');
+      const pimlicoClients = require('permissionless/clients/pimlico');
+      
+      // Get the functions we need from permissionless
+      if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
+        createSafeSmartAccount = permissionless.accounts.toSafeSmartAccount;
+      } else if (permissionless.toSafeSmartAccount) {
+        createSafeSmartAccount = permissionless.toSafeSmartAccount;
+      } else {
+        throw new Error('toSafeSmartAccount function not found');
+      }
+      
+      // Get Pimlico client creator
+      createPimlicoClient = pimlicoClients.createPimlicoClient;
+      
+      // Get smart account client creator
+      createSmartAccountClient = permissionless.createSmartAccountClient;
+    } catch (importError) {
+      console.error('Failed to import permissionless.js dependencies:', importError);
+      throw new Error('Failed to import required dependencies');
+    }
+    
+    // Create Pimlico client
+    const pimlicoApiKey = process.env.PIMLICO_API_KEY || '';
+    if (!pimlicoApiKey) {
+      throw new Error('Pimlico API key is required');
+    }
+    
+    const bundlerUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey}`;
+    const pimlicoClient = createPimlicoClient({
+      transport: http(bundlerUrl),
+      entryPoint: ENTRY_POINT_ADDRESS,
+    });
+    
+    // Create the smart account
+    const smartAccount = await createSafeSmartAccount({
+      client: publicClient,
+      owners: [owner],
+      entryPoint: {
+        address: ENTRY_POINT_ADDRESS,
+        version: "0.6",
+      },
+      chainId: sepolia.id,
+      version: "1.4.1",
+    });
+    
+    // Create the smart account client
+    const smartAccountClient = createSmartAccountClient({
+      account: smartAccount,
+      chain: sepolia,
+      bundlerTransport: http(bundlerUrl),
+      middleware: {
+        sponsorUserOperation: async (args: any) => {
+          try {
+            if (!pimlicoClient.sponsorUserOperation) {
+              throw new Error('Pimlico client not properly initialized');
+            }
+            
+            const response = await pimlicoClient.sponsorUserOperation({
+              userOperation: args.userOperation,
+              entryPoint: ENTRY_POINT_ADDRESS
+            });
+            return response;
+          } catch (err) {
+            console.error('Sponsorship error:', err);
+            throw err;
+          }
+        }
+      }
+    });
+    
+    return {
+      smartAccount,
+      smartAccountClient
+    };
+  } catch (error) {
+    console.error('Error getting smart account client:', error);
+    throw error;
+  }
+}
+
+/**
+ * Generate a deterministic private key that's unique to this user and auth method
+ * This ensures we get the same private key each time for the same user+auth combination
+ * The optional salt allows creating multiple different wallets for the same user
+ */
+export function generateCombinedKey(
+  privateKey: Hex, 
+  userId: string, 
+  authType: string,
+  salt: string = ''
+): Hex {
+  // Create a deterministic hash based on the user ID, private key, auth type, and optional salt
+  const combinedData = `${userId}-${privateKey}-${authType}-${salt}`;
+  const hash = createHash('sha256').update(combinedData).digest('hex');
   
-  // Create the smart account
-  const smartAccount = await createSafeSmartAccount(publicClient, owner);
+  // Ensure it's a valid private key format (32 bytes)
+  return `0x${hash}` as Hex;
+}
+
+// Add a new wallet to a user
+export function addWalletToUser(
+  userId: string, 
+  address: Address, 
+  name: string = 'My Wallet', 
+  chainId: number = 11155111 // Sepolia by default
+): Wallet {
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error(`User ${userId} not found`);
+  }
   
-  // Set up the smart account client with paymaster
-  const activeChain = getActiveChain();
-  const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+  // Initialize wallets array if it doesn't exist
+  if (!Array.isArray(user.wallets)) {
+    user.wallets = [];
+  }
   
-  const smartAccountClient = createSmartAccountClientWithPaymaster(
-    smartAccount,
-    pimlicoClient,
-    pimlicoUrl
-  );
+  // Set the previous default wallet to non-default
+  if (user.wallets.length > 0) {
+    user.wallets.forEach(wallet => {
+      wallet.isDefault = false;
+    });
+  }
   
-  return {
-    smartAccount,
-    smartAccountClient
+  // Create the new wallet
+  const newWallet: Wallet = {
+    address,
+    name,
+    chainId,
+    isDefault: true,
+    createdAt: Date.now()
   };
+  
+  // Add the wallet to the user's wallets
+  user.wallets.push(newWallet);
+  
+  // For backward compatibility, also set as the main walletAddress
+  user.walletAddress = address;
+  
+  // Save changes
+  updateUser(user);
+  
+  console.log(`Added new wallet ${address} to user ${userId}`);
+  return newWallet;
+}
+
+// Get all wallets for a user
+export function getWalletsForUser(userId: string): Wallet[] {
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error(`User ${userId} not found`);
+  }
+  
+  // Initialize wallets array if it doesn't exist
+  if (!Array.isArray(user.wallets)) {
+    user.wallets = [];
+    
+    // If there's a legacy walletAddress, convert it to a wallet
+    if (user.walletAddress) {
+      user.wallets.push({
+        address: user.walletAddress,
+        name: 'Primary Wallet',
+        chainId: 11155111, // Sepolia
+        isDefault: true,
+        createdAt: user.createdAt
+      });
+      updateUser(user);
+    }
+  }
+  
+  return user.wallets;
+}
+
+// Get the default wallet for a user
+export function getDefaultWallet(userId: string): Wallet | undefined {
+  const wallets = getWalletsForUser(userId);
+  return wallets.find(wallet => wallet.isDefault) || wallets[0];
+}
+
+// Set a wallet as the default for a user
+export function setDefaultWallet(userId: string, walletAddress: Address): void {
+  const user = findUserById(userId);
+  if (!user) {
+    throw new Error(`User ${userId} not found`);
+  }
+  
+  if (!Array.isArray(user.wallets) || user.wallets.length === 0) {
+    throw new Error(`User ${userId} has no wallets`);
+  }
+  
+  let foundDefault = false;
+  
+  // Update isDefault flag for all wallets
+  user.wallets.forEach(wallet => {
+    const isMatch = wallet.address.toLowerCase() === walletAddress.toLowerCase();
+    wallet.isDefault = isMatch;
+    if (isMatch) {
+      foundDefault = true;
+      // Also update the legacy walletAddress for backward compatibility
+      user.walletAddress = wallet.address;
+    }
+  });
+  
+  if (!foundDefault) {
+    throw new Error(`Wallet address ${walletAddress} not found for user ${userId}`);
+  }
+  
+  // Save changes
+  updateUser(user);
+  console.log(`Set wallet ${walletAddress} as default for user ${userId}`);
 }
 
 // Initialize storage on module load

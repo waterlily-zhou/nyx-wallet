@@ -16,7 +16,9 @@ The project has been successfully set up with:
 
 - Pimlico API key integration
 
-- Safe smart account creation
+- Real Safe Smart Contract Account creation using permissionless.js
+
+- Reliable fallback implementation using direct Safe contracts
 
 - Smart account client for transaction management
 
@@ -26,7 +28,9 @@ The project has been successfully set up with:
 
 ## Features
 
-- **Smart Account Creation**: Creates a Safe smart account controlled by your private key
+- **Real Smart Contract Accounts**: Creates counterfactual Safe smart accounts with proper ERC-4337 support
+
+- **Multiple Implementation Options**: Uses permissionless.js with fallback to direct Safe contracts for maximum reliability
 
 - **Intuitive Transaction Interface**: Send crypto and messages with a clear preview of transaction details
 
@@ -79,13 +83,38 @@ npm run dev
 
 This will:
 
-1. Create a Safe smart account controlled by your private key
+1. Create a real Safe smart account on Sepolia testnet
 
 2. Display the wallet address
 
 3. Show the current balance
 
 4. Provide instructions for using the account
+
+#### Test Smart Contract Account Creation
+
+To test the SCA creation directly:
+
+```bash
+# Test the JavaScript implementation
+node src/scripts/test-permissionless-direct.js
+
+# Test the TypeScript implementation (requires compilation)
+npx tsc src/lib/utils/permissionless-v2.ts --outDir dist --esModuleInterop
+node src/scripts/test-permissionless-v2.js
+```
+
+#### Troubleshooting
+
+If you encounter Next.js cache errors:
+
+```bash
+# Clear the Next.js cache
+./scripts/clear-cache.sh
+
+# Restart the development server
+npm run dev
+```
 
 #### Send a Transaction
 

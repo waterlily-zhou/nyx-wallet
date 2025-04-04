@@ -1,8 +1,10 @@
 import { Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { findUserById, decryptPrivateKey } from '@/lib/utils/user-store';
+import { findUserById, decryptPrivateKey, updateUser, encryptPrivateKey } from '@/lib/utils/user-store';
 import { createHash } from 'crypto';
 import { ClientSetup, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
+import { generateRandomPrivateKey, encryptServerKey } from '@/lib/utils/key-encryption';
+import { EncryptedKey } from '@/lib/types/credentials';
 
 export type WalletCreationParams = {
   method: 'biometric';
@@ -21,12 +23,40 @@ export async function createWallet(params: WalletCreationParams): Promise<{
     if (method === 'biometric') {
       console.log('Finding user by ID:', userId);
       const user = findUserById(userId);
-      if (!user || !user.serverKey) {
-        throw new Error('User or server key not found');
+      if (!user) {
+        throw new Error('User not found');
+      }
+      
+      // If no server key exists, generate one
+      if (!user.serverKey) {
+        console.log(`User ${userId} doesn't have a server key. Generating a new one...`);
+        const newServerKey = generateRandomPrivateKey();
+        // Use the server key encryption function which returns an EncryptedKey object
+        user.serverKey = encryptServerKey(newServerKey);
+        updateUser(user);
+        console.log('New server key generated and stored.');
+      }
+
+      // If no biometric key exists, generate one
+      if (!user.biometricKey) {
+        console.log(`User ${userId} doesn't have a biometric key. Generating a new one...`);
+        const newBiometricKey = generateRandomPrivateKey();
+        user.biometricKey = encryptPrivateKey(newBiometricKey, userId);
+        updateUser(user);
+        console.log('New biometric key generated and stored.');
       }
 
       console.log('Decrypting server key');
-      const serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || 'default_key');
+      // Handle server key based on its type (string or EncryptedKey)
+      let serverKey: Hex;
+      if (typeof user.serverKey === 'string') {
+        serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || 'default_key');
+      } else {
+        // Import the decryptServerKey function dynamically to avoid circular dependency
+        const { decryptServerKey } = await import('@/lib/utils/key-encryption');
+        serverKey = decryptServerKey(user.serverKey);
+      }
+      
       console.log('Combining keys');
       const combinedKey = `0x${createHash('sha256').update(deviceKey + serverKey).digest('hex')}` as Hex;
       const owner = privateKeyToAccount(combinedKey);

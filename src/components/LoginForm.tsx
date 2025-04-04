@@ -81,20 +81,53 @@ export default function LoginForm() {
       const challengeResponse = await fetch('/api/auth/challenge');
       const challengeData = await challengeResponse.json();
 
-      if (!challengeData.success || !challengeData.challenge) {
+      if (!challengeData.success) {
         throw new Error('Failed to get authentication challenge');
       }
 
-      // Authenticate with biometrics
-      const success = await authenticateWithBiometrics(challengeData.challenge);
-      
-      if (!success) {
-        throw new Error('Authentication failed');
+      if (!challengeData.challenge) {
+        throw new Error('Authentication challenge is missing');
       }
+
+      console.log('Challenge type:', typeof challengeData.challenge);
+      if (typeof challengeData.challenge !== 'string') {
+        console.error('Challenge is not a string:', challengeData.challenge);
+        throw new Error('Authentication challenge format is invalid');
+      }
+
+      // Authenticate with biometrics
+      const authResult = await authenticateWithBiometrics(challengeData.challenge);
+      
+      if (!authResult.success) {
+        throw new Error(authResult.error || 'Authentication failed');
+      }
+
+      console.log('Biometric authentication successful, loading wallet');
+      
+      // Load the wallet using the authenticated user ID
+      const loadWalletResponse = await fetch('/api/wallet/load', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ 
+          userId: authResult.userId 
+        }),
+      });
+      
+      const walletData = await loadWalletResponse.json();
+      
+      if (!walletData.success) {
+        console.error('Wallet loading failed:', walletData.error);
+        throw new Error(walletData.error || 'Failed to load wallet');
+      }
+      
+      console.log('Wallet loaded successfully with address:', walletData.wallet.address);
 
       // Redirect to dashboard
       router.push('/');
     } catch (err) {
+      console.error('Authentication error:', err);
       setError(err instanceof Error ? err.message : 'Authentication failed');
     } finally {
       setIsLoading(false);

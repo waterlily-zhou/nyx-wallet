@@ -36,4 +36,12 @@ export interface DistributedKeyData {
   deviceKey: Hex;             // Key portion stored on device (via WebAuthn)
   serverKey: Hex;             // Key portion stored on server (encrypted)
   recoveryKey: Hex;           // Recovery key (shown to user once)
+}
+
+export interface Wallet {
+  address: Address;
+  name: string;
+  chainId: number;
+  isDefault: boolean;
+  createdAt: number;
 } 
