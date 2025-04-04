@@ -595,7 +595,16 @@
         "deviceId": "46f1b784-37ae-4a05-9d9c-00bb9f3d5f75"
       }
     ],
-    "createdAt": "2025-03-22T11:11:35.011Z"
+    "createdAt": 1742641895011,
+    "wallets": [
+      {
+        "address": "0x9CD7aa316AE559d18Da4c833BFB1bE7467188837",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1742641895011
+      }
+    ]
   },
   {
     "id": "13833274d287e00ab7b2e46766efae63",
@@ -604,16 +613,26 @@
     "walletAddress": "0x5107773F4F61627FBbF52C8D3B0983a4bFA12bc3",
     "privateKey": "0x2395c63fec2af876f4e747fae1a77a2dad75c0fd425a8402ce7797491aa4695c",
     "credentials": [],
-    "createdAt": "2025-03-24T16:01:12.026Z"
+    "createdAt": 1742832072026,
+    "wallets": [
+      {
+        "address": "0x5107773F4F61627FBbF52C8D3B0983a4bFA12bc3",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1742832072026
+      }
+    ]
   },
   {
     "id": "2171c06eee95ee458f1e350775f1ac30",
     "username": "user_temp_1",
     "authType": "biometric",
     "credentials": [],
-    "createdAt": "2025-03-24T16:42:39.975Z",
+    "createdAt": 1742834559975,
     "serverKey": "0x6b996ee1811d3010c9663d06e90f3d4d055f7ec381e166097c3ae5aa8c018c9b",
-    "recoveryKeyHash": "adfc7cc5f73165b42360c213f30d311b446cdfbb1cb643d162d8e8b978bcf069"
+    "recoveryKeyHash": "adfc7cc5f73165b42360c213f30d311b446cdfbb1cb643d162d8e8b978bcf069",
+    "wallets": []
   },
   {
     "id": "422bca7d25a1f582c3939d210a5dd98e",
@@ -706,9 +725,18 @@
         "deviceId": "46f1b784-37ae-4a05-9d9c-00bb9f3d5f75"
       }
     ],
-    "createdAt": "2025-03-24T16:48:44.757Z",
+    "createdAt": 1742834924757,
     "serverKey": "0x5163a71d24fa666018ca0b2951398c6a0fbd6d1506bee3a41dcd4965953d0b99",
-    "recoveryKeyHash": "6a7061f3a6924a6029de78825494e73b5cf63d8aaa9238c9b559cafc5f475c5d"
+    "recoveryKeyHash": "6a7061f3a6924a6029de78825494e73b5cf63d8aaa9238c9b559cafc5f475c5d",
+    "wallets": [
+      {
+        "address": "0xDb123D0498D5Ec3E54238a265Ce3e33f857EDF62",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1742834924757
+      }
+    ]
   },
   {
     "id": "c2b551b3f197a987ec59578b2797f329",
@@ -801,9 +829,18 @@
         "deviceId": "46f1b784-37ae-4a05-9d9c-00bb9f3d5f75"
       }
     ],
-    "createdAt": "2025-03-24T16:49:42.771Z",
+    "createdAt": 1742834982771,
     "serverKey": "0x5affa33a7972685cab9d6483b7bdac624017cdb49f679fc5b70b981906d0a0d4",
-    "recoveryKeyHash": "37eedc024922426e1aef26243756f4eecffc1ca6fd199baf87fd04c503be237d"
+    "recoveryKeyHash": "37eedc024922426e1aef26243756f4eecffc1ca6fd199baf87fd04c503be237d",
+    "wallets": [
+      {
+        "address": "0x1780ABAB1EAe8613BDfbB6D9227F8F4D830e8433",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1742834982771
+      }
+    ]
   },
   {
     "id": "0a0ee440098ef27f4fd62b9134becac0",
@@ -811,7 +848,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T15:46:34.649Z"
+    "createdAt": 1743695194649,
+    "wallets": []
   },
   {
     "id": "452055c6dde592e067652a0733615eae",
@@ -819,7 +857,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T15:46:51.241Z"
+    "createdAt": 1743695211241,
+    "wallets": []
   },
   {
     "id": "d190fbeabe9ba264c518ab288b477334",
@@ -827,7 +866,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T15:48:00.889Z"
+    "createdAt": 1743695280889,
+    "wallets": []
   },
   {
     "id": "15de307bfd88671a44c29a1f45c7eae6",
@@ -835,7 +875,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T15:50:37.669Z"
+    "createdAt": 1743695437669,
+    "wallets": []
   },
   {
     "id": "9cb7a5d1cc81e34baf190275d99f8fa4",
@@ -843,7 +884,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:29:18.113Z"
+    "createdAt": 1743708558113,
+    "wallets": []
   },
   {
     "id": "e6b8a9567fc46be34c948927e62a8929",
@@ -851,7 +893,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:37:22.957Z"
+    "createdAt": 1743709042957,
+    "wallets": []
   },
   {
     "id": "d261f6f6326d45fb58f234cd23b59b7e",
@@ -859,7 +902,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:41:16.319Z"
+    "createdAt": 1743709276319,
+    "wallets": []
   },
   {
     "id": "6ee7400f1c8e9d56153163774a2565ff",
@@ -867,7 +911,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:43:21.821Z"
+    "createdAt": 1743709401821,
+    "wallets": []
   },
   {
     "id": "c479d90e3d1b5cac84df91b4507ddf4d",
@@ -875,7 +920,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:47:58.825Z",
+    "createdAt": 1743709678825,
     "serverKey": {
       "iv": "OZLaolWb9F0+Pr2X/MXy9Q==",
       "data": "Md2eetwbI7nK3C20i93MhCAW8WURhJyNGCA5Jk8jYqf7tpU60vxTOL+cuFPcMhUfcBGUWMpWX36Skv566riCvhAH",
@@ -883,7 +928,8 @@
       "algorithm": "AES-256-GCM-SCRYPT",
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
-    "recoveryKeyHash": "b25a7785e9ed08e9c45afed7f1ffbfcf04cc7e9dd278e91be204b45a6ff3bd57"
+    "recoveryKeyHash": "b25a7785e9ed08e9c45afed7f1ffbfcf04cc7e9dd278e91be204b45a6ff3bd57",
+    "wallets": []
   },
   {
     "id": "d70a161650aa968500518faf9d73185e",
@@ -891,7 +937,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:52:59.088Z",
+    "createdAt": 1743709979088,
     "serverKey": {
       "iv": "2l75DjJ2OcGkQ4NbDRMJdQ==",
       "data": "Xr7rPHuinpY2p3MDLCzBaZtffrAc7G+xazZxTTl5etj+ZJYqHYXMGEje5EztvJ/l+4Vh+k68G1SkwKMb/q1Ly+4Q",
@@ -899,7 +945,8 @@
       "algorithm": "AES-256-GCM-SCRYPT",
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
-    "recoveryKeyHash": "58cb0e5eed40765202c588699ba649d3c2bf4dc70cfbacc0beb57e002554bf39"
+    "recoveryKeyHash": "58cb0e5eed40765202c588699ba649d3c2bf4dc70cfbacc0beb57e002554bf39",
+    "wallets": []
   },
   {
     "id": "c565be1798fb41092dacabd9b60a23cf",
@@ -907,7 +954,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-03T19:55:07.144Z",
+    "createdAt": 1743710107144,
     "serverKey": {
       "iv": "Fw7g7EWNyy7ufGmlb4yIJA==",
       "data": "iLjFLAnHvAha9rorJs63gtFna8BYrT39rCliZttHH0MQ2A2IeTELwSv/wFzHd7C+xRTC9OjLziTNmTjp0sh5eDIx",
@@ -916,7 +963,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "19cfc8fb1918f2cfb8f4e1b9a212ef84784b36b8037c64ac61afdec358affa64",
-    "walletAddress": "0x31e3dbc7dec7982bd7f97719b3019a8e29062afa"
+    "walletAddress": "0x31e3dbc7dec7982bd7f97719b3019a8e29062afa",
+    "wallets": [
+      {
+        "address": "0x31e3dbc7dec7982bd7f97719b3019a8e29062afa",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743710107144
+      }
+    ]
   },
   {
     "id": "18409a9753f6ccbac65a2294f3980e8e",
@@ -924,7 +980,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T10:57:00.212Z",
+    "createdAt": 1743764220212,
     "serverKey": {
       "iv": "p1RsEs0bqeu+2jimXLh0Kw==",
       "data": "K7NdJ8Hx1g1yE4fCPeYP7jpxF6CyZ+G+QbCPqL+oNUZWac3eA7p9yN/BDFzSPRZawAzUha73kz8pKeHxxsLdSqDo",
@@ -933,7 +989,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "5e57eb56802c13f4ccb466d92e810aa134fb0decb20a5bccd3bf0d719ec32192",
-    "walletAddress": "0x417813415DdCFA283ee6c4a7673A2dA59f0193de"
+    "walletAddress": "0x417813415DdCFA283ee6c4a7673A2dA59f0193de",
+    "wallets": [
+      {
+        "address": "0x417813415DdCFA283ee6c4a7673A2dA59f0193de",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743764220212
+      }
+    ]
   },
   {
     "id": "2c7ff5883d9e4bbe09fa845f6bed6bc2",
@@ -941,7 +1006,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T11:04:02.623Z",
+    "createdAt": 1743764642623,
     "serverKey": {
       "iv": "1gNpMgoSd6S8ACylhFbuZw==",
       "data": "kPi2rgogPoWHea6t9c8q7u4+clY5HGI7RKVcuNwn3gIm3puZ8+d5AxSFrwLv8u/TeOF4qLzJCck1X5qqVwO1D5rM",
@@ -950,7 +1015,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "a3d72c8c40862f286ed09a38f32f45b1627eefa10e47a82d97f5b7004c95800b",
-    "walletAddress": "0x11a308284e3316abdc7f5c4765c0c624e8f38197"
+    "walletAddress": "0x11a308284e3316abdc7f5c4765c0c624e8f38197",
+    "wallets": [
+      {
+        "address": "0x11a308284e3316abdc7f5c4765c0c624e8f38197",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743764642623
+      }
+    ]
   },
   {
     "id": "00c74e2b0a5cefd590d41bcf5430cf75",
@@ -958,7 +1032,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T11:33:09.026Z",
+    "createdAt": 1743766389026,
     "serverKey": {
       "iv": "wY8ggAWE+p4vbZ3VaNAzoA==",
       "data": "KSd1zdW8HO8KQ/gv/7YQMgfQStR7kKIx5ZEuGl75nDtZvsY0pr8y8X+3vuLnkI9D7sO5UUYhfZa1MBe16c25fxhg",
@@ -967,7 +1041,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "c668cfc1de2073de118c6fed55154d75ad4219643c3eea187b159e73cc5b9ed2",
-    "walletAddress": "0xf8d72beb77e410c6e8585a133f607c8ee1275557"
+    "walletAddress": "0xf8d72beb77e410c6e8585a133f607c8ee1275557",
+    "wallets": [
+      {
+        "address": "0xf8d72beb77e410c6e8585a133f607c8ee1275557",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743766389026
+      }
+    ]
   },
   {
     "id": "f70ecdcd5356d1126eeed89b380c4a15",
@@ -975,7 +1058,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T12:05:43.054Z",
+    "createdAt": 1743768343054,
     "serverKey": {
       "iv": "NahMsEZKkhtaXJHNYqbHCg==",
       "data": "1xntv2jJX0hlr3NJshJ5MXoDaoA2vvVkea6A9E3XjaeE1LAjO11T3e5B5zsfolhmP5yPTk/UKVD2NtLOB3WJTJVF",
@@ -984,7 +1067,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "4fa503480607fe60fa0c5788deaa21e1f46024af407ffb4af6ac2f2f4673d686",
-    "walletAddress": "0x1df638fa731907d39882e3a59b526f8cb44e2479"
+    "walletAddress": "0x1df638fa731907d39882e3a59b526f8cb44e2479",
+    "wallets": [
+      {
+        "address": "0x1df638fa731907d39882e3a59b526f8cb44e2479",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743768343054
+      }
+    ]
   },
   {
     "id": "9b9b8efb3dae35453592a0f17226f006",
@@ -992,7 +1084,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T12:12:32.023Z",
+    "createdAt": 1743768752023,
     "serverKey": {
       "iv": "KXATQbToBi3Qqy3UUklk0w==",
       "data": "spx/nGJpqdnLg8Kr63YOIppDVTbk4TtU8c6VQveaszBieNQMt8nNPQX7jzw/SENDxo4W8x/3RncwBqm68VAfeobq",
@@ -1001,7 +1093,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "84dc65b5832f4a47feb3011dae74af635bd3787a53136502ceefb3ba46f44542",
-    "walletAddress": "0xe4c5BA66a7C279E8D4548Ef909f04f0654aA7a3D"
+    "walletAddress": "0xe4c5BA66a7C279E8D4548Ef909f04f0654aA7a3D",
+    "wallets": [
+      {
+        "address": "0xe4c5BA66a7C279E8D4548Ef909f04f0654aA7a3D",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743768752023
+      }
+    ]
   },
   {
     "id": "user_1743783795595_rdw2vvn",
@@ -1009,7 +1110,8 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T16:23:15.595Z"
+    "createdAt": 1743783795595,
+    "wallets": []
   },
   {
     "id": "user_1743784133134_4qa79z9",
@@ -1017,7 +1119,7 @@
     "authType": "biometric",
     "authenticators": [],
     "credentials": [],
-    "createdAt": "2025-04-04T16:28:53.134Z",
+    "createdAt": 1743784133134,
     "biometricKey": "U2FsdGVkX18UxSQ+MTA/TeSdYzoFUfEUqxBmo4oweTsSG8GeAAdOAAwh0VYttE0vv94ZcdfHAkpfieiaBA/6j5CGISR76lZeokOTz273yYsRjmFIdHHgZzi5vZnugIoI",
     "serverKey": {
       "iv": "kMfCXXtGzP9qCsT9b56UCQ==",
@@ -1027,7 +1129,16 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "a62aa495e16dd6c89f86006f93a9997ea54d5a18c181710ecf30afb6acc1b6fd",
-    "walletAddress": "0x66dF3ce5543cC43f34624f1ba6D97525115dffFC"
+    "walletAddress": "0x66dF3ce5543cC43f34624f1ba6D97525115dffFC",
+    "wallets": [
+      {
+        "address": "0x66dF3ce5543cC43f34624f1ba6D97525115dffFC",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743784133134
+      }
+    ]
   },
   {
     "id": "user_1743785198454_u0bkvi7",
@@ -1045,6 +1156,24 @@
       "algorithm": "AES-256-GCM-SCRYPT",
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
-    "recoveryKeyHash": "55195f0a745b65335fa77330c0dd63d2e108a69c51fa2e66484f91e8cd926a26"
+    "recoveryKeyHash": "55195f0a745b65335fa77330c0dd63d2e108a69c51fa2e66484f91e8cd926a26",
+    "wallets": [
+      {
+        "address": "0x26C35D3DC2f3bEFaC6c01acE1C1d8143d9F8fF59",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743785198454
+      }
+    ]
+  },
+  {
+    "id": "test_user",
+    "username": "test_test_",
+    "authType": "biometric",
+    "createdAt": 1743797887262,
+    "wallets": [],
+    "serverKey": "U2FsdGVkX19Lf06XaIpmf+sQ8rsFX+84Mhqb3EKDkB8ULRgsLy779UMY3JHP2gpfMKsX7DGwCQDKS8fIr1eDss5HRoOWZlsK4aITHpKGddo6aJ9SqyApi3wvIRA5AwSn",
+    "biometricKey": "U2FsdGVkX1+8a6K8/foinxOx5Ei6pJbBLU96IokPNZDeEJOlJ+FYjEe0UpoDiQ/2J1zh5eqFvsW5zUjQlqsMfKepI/w2GUDLcu9JpPUyke05VdoT9fECOs13+jyyA6po"
   }
 ]

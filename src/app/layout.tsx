@@ -17,9 +17,14 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body className={inter.className}>
-        <main className="min-h-screen bg-gray-50">
-          {children}
-        </main>
+        <div style={{ background: "black", color: "white", minHeight: "100vh" }}>
+          <header style={{ padding: "1rem 1.5rem", borderBottom: "1px solid #333" }}>
+            <div style={{ fontWeight: "bold" }}>nyx_wallet</div>
+          </header>
+          <main>
+            {children}
+          </main>
+        </div>
       </body>
     </html>
   );
