@@ -28,10 +28,12 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const [totalValueUSD, setTotalValueUSD] = useState("0.00");
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showTransactionFlow, setShowTransactionFlow] = useState(false);
+  const [networkInfo, setNetworkInfo] = useState<any>(null);
   
   useEffect(() => {
     if (walletAddress) {
       fetchTokenBalances(walletAddress);
+      fetchNetworkInfo();
     }
   }, [walletAddress]);
 
@@ -51,6 +53,7 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
       
       const data = await response.json();
       if (data.success) {
+        console.log('Received asset data:', data.assets);
         setAssets(data.assets || []);
         setTotalValueUSD(data.totalValueUSD || "0.00");
       }
@@ -121,6 +124,18 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
     setShowTransactionFlow(false);
     // Refresh balance after transaction flow is closed
     refreshBalance();
+  };
+  
+  const fetchNetworkInfo = async () => {
+    try {
+      const response = await fetch('/api/debug/network');
+      if (response.ok) {
+        const data = await response.json();
+        setNetworkInfo(data.network);
+      }
+    } catch (err) {
+      console.error('Error fetching network info:', err);
+    }
   };
   
   return (
@@ -207,7 +222,7 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
                             <div className="text-sm font-medium">{asset.name}</div>
                             <div className="flex items-center mt-1">
                               <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-900 text-green-200">
-                                {asset.network}
+                                {asset.network === 'Base Sepolia' ? 'Base Sepolia' : asset.network}
                               </span>
                             </div>
                           </div>
@@ -241,6 +256,31 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
                 )}
               </tbody>
             </table>
+          </div>
+        </div>
+      </div>
+      
+      {/* Debug section - only for development */}
+      <div className="mt-8 p-4 border border-gray-700 rounded-lg">
+        <h3 className="text-lg font-bold mb-2">Debug Information</h3>
+        <div className="space-y-2 text-sm">
+          <p><span className="text-gray-400">Wallet Address:</span> {walletAddress}</p>
+          <p><span className="text-gray-400">Network:</span> Base Sepolia (Chain ID: 84532)</p>
+          <p><span className="text-gray-400">Asset Count:</span> {assets.length}</p>
+          <p><span className="text-gray-400">API Response:</span> {isRefreshing ? 'Loading...' : 'Complete'}</p>
+          {networkInfo && (
+            <div>
+              <p className="text-gray-400 mb-1">Network Info:</p>
+              <pre className="bg-gray-800 p-2 rounded overflow-auto text-xs">
+                {JSON.stringify(networkInfo, null, 2)}
+              </pre>
+            </div>
+          )}
+          <div>
+            <p className="text-gray-400 mb-1">Asset Details:</p>
+            <pre className="bg-gray-800 p-2 rounded overflow-auto text-xs">
+              {JSON.stringify(assets, null, 2)}
+            </pre>
           </div>
         </div>
       </div>

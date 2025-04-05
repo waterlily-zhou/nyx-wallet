@@ -1,4 +1,4 @@
-import fetch from 'node-fetch';
+// Native fetch is globally available in Next.js, no need to import
 import { parseEther, parseUnits } from 'viem';
 
 // Environment variables for API keys

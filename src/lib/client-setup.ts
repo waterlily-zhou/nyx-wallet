@@ -10,13 +10,9 @@ export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' 
 
 // Alternative RPC providers for Sepolia with additional options
 const SEPOLIA_RPC_URLS = [
-  'https://sepolia.drpc.org',
-  'https://rpc.sepolia.org',
-  'https://sepolia.infura.io/v3/9aa3d95b3bc440fa88ea12eaa4456161', // Public Infura key
-  'https://ethereum-sepolia.publicnode.com',
-  'https://eth-sepolia.g.alchemy.com/v2/demo', // Alchemy demo key
-  'https://base-sepolia-rpc.publicnode.com', // Base Sepolia
-  'https://sepolia.base.org',
+  'https://sepolia.base.org',  // Primary Base Sepolia endpoint
+  'https://base-sepolia-rpc.publicnode.com', // Base Sepolia public node
+  'https://sepolia.base.org',  // Listed again for redundancy
 ];
 
 export interface ClientSetup {
