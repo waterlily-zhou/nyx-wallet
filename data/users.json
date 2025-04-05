@@ -1175,5 +1175,34 @@
     "wallets": [],
     "serverKey": "U2FsdGVkX19Lf06XaIpmf+sQ8rsFX+84Mhqb3EKDkB8ULRgsLy779UMY3JHP2gpfMKsX7DGwCQDKS8fIr1eDss5HRoOWZlsK4aITHpKGddo6aJ9SqyApi3wvIRA5AwSn",
     "biometricKey": "U2FsdGVkX1+8a6K8/foinxOx5Ei6pJbBLU96IokPNZDeEJOlJ+FYjEe0UpoDiQ/2J1zh5eqFvsW5zUjQlqsMfKepI/w2GUDLcu9JpPUyke05VdoT9fECOs13+jyyA6po"
+  },
+  {
+    "id": "user_1743866153384_pmkyowr",
+    "username": "user_1743866152910",
+    "authType": "biometric",
+    "wallets": [],
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": 1743866153384,
+    "biometricKey": "U2FsdGVkX1+USvSJA9EGg8tC61z4Rrk4uElZGFsbTexn39Wspx1sHJAJJJL7JsUfxLcmM2O2ujRFgcN2HyCFhQeHZAWtzi1lnAlm9QxfQUUg//zXjx5+YLJ/wdn6SxwV",
+    "serverKey": {
+      "iv": "JN/pTRF3mdlYJYwjbAclJQ==",
+      "data": "xoGaXsermDhfTiexLwit2TRPB+cj++laWgpda2DRxqtH/N72szpzr2xktNqzkeiPhkAqyQYgU5sUHmXGSX2I0xOc",
+      "tag": "AQ5m5RPc6i2asIc3ceH6Ng==",
+      "algorithm": "AES-256-GCM-SCRYPT",
+      "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
+    },
+    "recoveryKeyHash": "990b43ced5edf0be24056588b6f70973c4d4e2297c19876aecfe77209468e69d",
+    "walletAddress": "0xB6E897704689aA039B1eE791FBCcD0D7A66A20B1"
+  },
+  {
+    "id": "user_1743867991560_zzu3x14",
+    "username": "user_1743867990505",
+    "authType": "biometric",
+    "wallets": [],
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": 1743867991560,
+    "biometricKey": "U2FsdGVkX1/6R3w6mngg4m3WxUs2bDaBE9qaJfkcrb/7fNVXrCF5XdTeIBPOMtLqFrr4eRgzwtZq+MhmWF6xEyo0ZeOcgKzXj9jSYHbJiNiBCnXs9puTdwr0/f+xHnQ7"
   }
 ]

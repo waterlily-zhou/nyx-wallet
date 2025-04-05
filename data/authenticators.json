@@ -78,5 +78,15 @@
     "deviceName": "Default Device",
     "createdAt": "2025-04-04T16:46:43.442Z",
     "lastUsed": "2025-04-04T16:46:43.442Z"
+  },
+  {
+    "id": "48b6fe48-2762-4472-898f-e9ea81379782",
+    "walletAddress": "0xD7904d5c8C5e3e29E46Fb7F7911DCcb697B1368F",
+    "credentialID": "6mxsVdU3R027K8__iOPpZRr5rIU",
+    "credentialPublicKey": "Nm14c1ZkVTNSMDI3SzhfX2lPUHBaUnI1cklV",
+    "counter": 0,
+    "deviceName": "Default Device",
+    "createdAt": "2025-04-05T15:15:58.841Z",
+    "lastUsed": "2025-04-05T15:15:58.841Z"
   }
 ]

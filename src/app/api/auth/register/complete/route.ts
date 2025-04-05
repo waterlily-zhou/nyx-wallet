@@ -97,7 +97,8 @@ export async function POST(request: NextRequest) {
       try {
         // Create smart account from the credential using DKG
         console.log('API: Creating smart account...');
-        const { address } = await createSmartAccountFromCredential(userId, 'biometric');
+        // Pass forceCreate=true since this is explicitly a wallet creation flow
+        const { address } = await createSmartAccountFromCredential(userId, 'biometric', true);
         console.log(`API: Smart account created with address: ${address}`);
         
         // Store the authenticator

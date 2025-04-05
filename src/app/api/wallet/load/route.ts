@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { createSmartAccountFromCredential } from '@/lib/utils/user-store';
+import { findUserById } from '@/lib/utils/user-store';
 
 export async function POST(request: NextRequest) {
   try {
@@ -20,61 +20,67 @@ export async function POST(request: NextRequest) {
     
     console.log(`API: Loading wallet for user ${userId}`);
     
-    // Load the smart account using biometric authentication
-    try {
-      const smartAccountResult = await createSmartAccountFromCredential(
-        userId,
-        'biometric'
+    // Find user and check if they already have a wallet address
+    const user = findUserById(userId);
+    if (!user) {
+      console.error(`API: User ${userId} not found`);
+      return NextResponse.json(
+        { success: false, error: 'User not found' },
+        { status: 404 }
       );
-      
-      console.log(`API: Successfully loaded wallet with address ${smartAccountResult.address}`);
-      
-      // Set the wallet address in cookies
-      const cookieStore = cookies();
-      cookieStore.set('walletAddress', smartAccountResult.address, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 24 * 60 * 60, // 24 hours
-      });
-      
-      // Set authenticated session
-      cookieStore.set('session', 'authenticated', {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 24 * 60 * 60, // 24 hours
-      });
-      
-      // Set user ID cookie for future requests
-      cookieStore.set('userId', userId, {
-        httpOnly: true,
-        secure: process.env.NODE_ENV === 'production',
-        sameSite: 'strict',
-        path: '/',
-        maxAge: 24 * 60 * 60, // 24 hours
-      });
-      
-      return NextResponse.json({
-        success: true,
-        wallet: {
-          address: smartAccountResult.address
-        },
-        message: 'Wallet loaded successfully'
-      });
-    } catch (error) {
-      console.error('API: Error loading smart account:', error);
+    }
+    
+    // Check if user already has a wallet address
+    if (!user.walletAddress) {
+      console.log(`API: User ${userId} has no existing wallet address. A wallet needs to be created first.`);
       return NextResponse.json(
         { 
           success: false, 
-          error: error instanceof Error ? error.message : 'Failed to load wallet',
-          detail: 'Smart account creation failed'
+          error: 'No wallet found for this user. Please create a wallet first.',
+          needsWalletCreation: true 
         },
-        { status: 500 }
+        { status: 404 }
       );
     }
+    
+    console.log(`API: Found existing wallet with address ${user.walletAddress}`);
+    
+    // Set the wallet address in cookies
+    const cookieStore = cookies();
+    cookieStore.set('walletAddress', user.walletAddress, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 24 * 60 * 60, // 24 hours
+    });
+    
+    // Set authenticated session
+    cookieStore.set('session', 'authenticated', {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 24 * 60 * 60, // 24 hours
+    });
+    
+    // Set user ID cookie for future requests
+    cookieStore.set('userId', userId, {
+      httpOnly: true,
+      secure: process.env.NODE_ENV === 'production',
+      sameSite: 'strict',
+      path: '/',
+      maxAge: 24 * 60 * 60, // 24 hours
+    });
+    
+    return NextResponse.json({
+      success: true,
+      wallet: {
+        address: user.walletAddress
+      },
+      message: 'Existing wallet loaded successfully'
+    });
+    
   } catch (error) {
     console.error('API: Error in wallet load endpoint:', error);
     return NextResponse.json(

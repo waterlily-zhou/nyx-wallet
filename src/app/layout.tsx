@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import "./globals.css";
+import { cookies } from "next/headers";
 
 export const metadata: Metadata = {
   title: "Nyx Wallet",
@@ -11,6 +12,10 @@ export default function RootLayout({
 }: {
   children: React.ReactNode;
 }) {
+  // Check if user is authenticated to determine if we're showing dashboard
+  const cookieStore = cookies();
+  const isAuthenticated = cookieStore.has('session') && cookieStore.get('session')?.value === 'authenticated';
+  
   return (
     <html lang="en">
       <body>
@@ -18,7 +23,7 @@ export default function RootLayout({
           <header className="py-4 px-6 border-b border-violet-500">
             <div className="logo-text text-lg">nyx_wallet</div>
           </header>
-          <main className="flex-1 flex items-center justify-center">
+          <main className={`flex-1 ${!isAuthenticated ? 'items-center justify-center' : ''}`}>
             {children}
           </main>
         </div>

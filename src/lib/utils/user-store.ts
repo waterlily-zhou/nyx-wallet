@@ -12,6 +12,11 @@ import fs from 'fs';
 import path from 'path';
 import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys, hashRecoveryKey, encryptServerKey, decryptServerKey } from './key-encryption';
 import { Authenticator, EncryptedKey, AuthenticatorDevice, Wallet } from '../types/credentials';
+import { withRetry } from './retry-utils';
+import { createPublicClientForSepolia } from '../client-setup';
+import { createPimlicoClient } from 'permissionless/clients/pimlico';
+import { createSmartAccountClient } from 'permissionless';
+import { toSafeSmartAccount } from 'permissionless/accounts';
 
 // Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
@@ -234,12 +239,42 @@ export function encryptPrivateKey(privateKey: Hex, password: string): string {
 // Decrypt a private key with a password
 export function decryptPrivateKey(encryptedKey: string, password: string): Hex {
   try {
+    console.log('Decrypting private key...');
     const bytes = CryptoJS.AES.decrypt(encryptedKey, password);
-    return bytes.toString(CryptoJS.enc.Utf8) as Hex;
+    const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
+    
+    // Validate the decrypted string
+    if (!decryptedString || decryptedString.length === 0) {
+      throw new Error('Decryption resulted in empty string');
+    }
+    
+    console.log('Decrypted key successfully. Format check...');
+    
+    // Format the key as a proper hex string if needed
+    let formattedKey = decryptedString;
+    if (!formattedKey.startsWith('0x')) {
+      formattedKey = `0x${formattedKey}`;
+      console.log('Added 0x prefix to key');
+    }
+    
+    // Check if it's a valid hex string (should only contain 0-9, a-f, A-F after 0x)
+    const hexRegex = /^0x[0-9a-fA-F]+$/;
+    if (!hexRegex.test(formattedKey)) {
+      console.error('Decrypted key is not a valid hex string:', formattedKey.substring(0, 6) + '...');
+      throw new Error('Decrypted key is not a valid hex string');
+    }
+    
+    // For a 32-byte private key, there should be 64 hex characters after 0x
+    if (formattedKey.length !== 66) {
+      console.warn(`Decrypted key has unusual length: ${formattedKey.length} chars (expected 66)`);
+    }
+    
+    return formattedKey as Hex;
   } catch (error) {
     console.error('Error decrypting private key:', error);
     // Return a default key for development
     if (process.env.NODE_ENV !== 'production') {
+      console.warn('Using hardcoded test private key for development');
       return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
     }
     throw error;
@@ -300,94 +335,285 @@ export async function createSmartAccountFromPrivateKey(privateKey: Hex): Promise
 //* SIGNER 2: BIOMETRICS -> SCA
 // Create a smart account from biometric or social credentials
 export async function createSmartAccountFromCredential(
-  userId: string, 
-  authType: 'biometric' | 'social',
-  salt: string = '' // Optional salt parameter for creating different wallets
-): Promise<{
-  address: Address;
-  privateKey: Hex;
-  clientSetup: ClientSetup;
-}> {
-  console.log(`Creating smart account for user ${userId} with ${authType} authentication${salt ? ' and salt: ' + salt : ''}`);
-  
-  // Find the user
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error(`User ${userId} not found`);
-  }
-  
-  // Get the private key based on auth type
-  let privateKey: Hex;
-  if (authType === 'biometric') {
-    if (!user.biometricKey) {
-      console.log(`User ${userId} doesn't have a biometric key. Generating a new one...`);
-      // Generate a new biometric key
-      privateKey = generateRandomPrivateKey();
-      // Encrypt and store it for future use
-      user.biometricKey = encryptPrivateKey(privateKey, userId);
-      updateUser(user);
-      console.log('New biometric key generated and stored.');
-    } else {
-      privateKey = decryptPrivateKey(user.biometricKey, userId);
-    }
-  } else {
-    if (!user.socialKey) {
-      console.log(`User ${userId} doesn't have a social key. Generating a new one...`);
-      // Generate a new social key
-      privateKey = generateRandomPrivateKey();
-      // Encrypt and store it for future use
-      user.socialKey = encryptPrivateKey(privateKey, userId);
-      updateUser(user);
-      console.log('New social key generated and stored.');
-    } else {
-      privateKey = decryptPrivateKey(user.socialKey, userId);
-    }
-  }
-  
-  // Generate a combined key that's unique to this user and auth method (with optional salt)
-  const combinedKey = generateCombinedKey(privateKey, userId, authType, salt);
-  
+  userId: string,
+  authenticationType: 'biometric' | 'passkey' = 'biometric',
+  forceCreate: boolean = false // Add parameter to control SCA creation
+) {
   try {
-    // Try the improved permissionless.js v2 implementation
-    try {
-      console.log('Creating SCA with improved permissionless.js v2 implementation...');
-      
-      // Try the JavaScript version first (more reliable with direct requires)
-      try {
-        const { createPermissionlessSCADirectJS } = require('./permissionless-js-direct');
-        return await createPermissionlessSCADirectJS(combinedKey);
-      } catch (jsError) {
-        console.log('JS implementation failed, trying TypeScript version...');
-        const { createPermissionlessSCAv2 } = await import('./permissionless-v2');
-        return await createPermissionlessSCAv2(combinedKey);
-      }
-    } catch (v2Error) {
-      console.error('Error creating SCA with improved permissionless.js v2:', v2Error);
-      console.log('Falling back to direct Safe Smart Account implementation...');
-      
-      // If v2 fails, directly use the fallback implementation
-      // Define a function to update the user's wallet address
-      const updateUserWalletAddress = (id: string, address: Address) => {
-        const user = findUserById(id);
-        if (user) {
-          user.walletAddress = address;
-          updateUser(user);
-        }
-      };
-      
-      // Import the fallback implementation
-      const { createFallbackSmartAccount } = await import('./fallback-sca');
-      
-      // Create a real Smart Contract Account using our fallback implementation
-      return await createFallbackSmartAccount(
-        userId,
-        combinedKey,
-        updateUserWalletAddress
-      );
+    console.log(`Managing smart account for user ${userId} with ${authenticationType} authentication`);
+    
+    // Get the user from storage
+    const user = findUserById(userId);
+    if (!user) {
+      throw new Error(`User ${userId} not found`);
     }
+
+    // Check if user already has a wallet address
+    if (user.walletAddress && !forceCreate) {
+      console.log(`User ${userId} already has a wallet address: ${user.walletAddress}`);
+      return {
+        address: user.walletAddress,
+        exists: true
+      };
+    }
+
+    // If we're here, either we need to create a new wallet or force create was specified
+    console.log(`Creating new smart account for user ${userId}`);
+    
+    // Get private key from the user, handle different authentication types
+    let privateKey: string | undefined;
+    if (authenticationType === 'biometric') {
+      privateKey = user.biometricKey;
+    } else if (authenticationType === 'passkey') {
+      privateKey = user.socialKey;
+    }
+
+    if (!privateKey) {
+      throw new Error(`No ${authenticationType} private key found for user ${userId}`);
+    }
+    
+    // Decrypt the private key before using it
+    // This is the key fix - we need to make sure the key is in the right format
+    let decryptedKey: `0x${string}`;
+    try {
+      // Try to decrypt the key first
+      decryptedKey = decryptPrivateKey(privateKey, userId);
+      console.log('Successfully decrypted private key');
+      
+      // Check if it's a valid hex string
+      if (!decryptedKey.startsWith('0x')) {
+        console.log('Key is not a valid hex string, adding 0x prefix');
+        decryptedKey = `0x${decryptedKey}` as `0x${string}`;
+      }
+      
+      // Ensure correct key length
+      if (decryptedKey.length !== 66) { // Should be 0x + 64 hex chars for 32 bytes
+        throw new Error(`Invalid key length: ${decryptedKey.length} chars (expected 66)`);
+      }
+    } catch (decryptError) {
+      console.error('Error decrypting private key:', decryptError);
+      
+      // In development, for testing, use a default key
+      if (process.env.NODE_ENV !== 'production') {
+        console.log('Using default testing private key in development');
+        decryptedKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
+      } else {
+        throw new Error(`Failed to decrypt private key: ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
+      }
+    }
+    
+    // Create the smart account with retry logic to handle rate limits
+    return await withRetry(
+      async () => {
+        console.log("Creating SCA with improved permissionless.js v2 implementation...");
+        const result = await createPermissionlessSCA(
+          userId, 
+          decryptedKey, 
+          updateUserWalletAddress
+        );
+        
+        // Update the user object with the new wallet address
+        if (user && result.address) {
+          user.walletAddress = result.address;
+          updateUser(user);
+          console.log(`Updated user ${userId} with wallet address ${result.address}`);
+        }
+        
+        return {
+          ...result,
+          exists: false // This is a newly created account
+        };
+      },
+      {
+        maxRetries: 5,
+        initialDelay: 2000,
+        maxDelay: 15000,
+        backoffFactor: 2,
+        retryableErrors: [
+          'Too many request',
+          'rate limit',
+          'Rate limit',
+          'too many request',
+          'Too Many Requests',
+          'too many requests',
+          'Request failed with status code 429'
+        ]
+      }
+    );
   } catch (error) {
-    console.error('All Smart Account creation methods failed:', error);
+    console.error('Error creating smart account from credential:', error);
+    const errorDetails = error instanceof Error ? error : new Error(String(error));
+    
+    console.error('API: SCA creation error details:', JSON.stringify({
+      message: errorDetails.message,
+      stack: errorDetails.stack,
+      type: 'smart_account_creation_error'
+    }));
+    
+    throw errorDetails;
+  }
+}
+
+async function createPermissionlessSCA(
+  userId: string,
+  privateKey: `0x${string}`,
+  updateUserFn: (userId: string, walletAddress: Address) => void
+) {
+  try {
+    console.log('Creating permissionless SCA (JS) for owner');
+    
+    // Create the owner account from the private key
+    const owner = privateKeyToAccount(privateKey);
+    console.log(`Owner EOA address: ${owner.address}`);
+    
+    // Get library version
+    const pkgVersion = getPermissionlessVersion();
+    console.log(`Permissionless version: ${pkgVersion}`);
+    
+    // List available account functions
+    const accountFunctions = getAvailableAccountFunctions();
+    console.log('Available account functions:');
+    for (const fn of accountFunctions) {
+      console.log(`- ${fn}`);
+    }
+    
+    // Use Safe Smart Account
+    console.log('Using accounts.toSafeSmartAccount');
+    
+    // Create public client with better fallback and retry
+    const publicClient = createPublicClientForSepolia();
+    
+    // Safe account parameters
+    const safeParams: any = {
+      client: publicClient,
+      owners: [owner],
+      version: "1.4.1",
+      entryPoint: {
+        address: ENTRY_POINT_ADDRESS,
+        version: "0.6" as const,
+      },
+      saltNonce: BigInt(0),
+      chainId: sepolia.id,
+    };
+    
+    console.log('Creating Safe Smart Account with parameters...');
+    console.log('Safe Account Parameters:', JSON.stringify({
+      client: 'PublicClient [OK]',
+      owners: [`Owner (${owner.address})`],
+      version: safeParams.version,
+      entryPoint: safeParams.entryPoint,
+      saltNonce: safeParams.saltNonce.toString() + 'n',
+      chainId: safeParams.chainId
+    }, null, 2));
+    
+    // Create the smart account
+    const smartAccount = await toSafeSmartAccount(safeParams);
+    console.log(`Created Smart Account with address: ${smartAccount.address}`);
+    
+    // Create Pimlico client for paymaster functionality
+    const pimlicoApiKey = process.env.PIMLICO_API_KEY;
+    if (!pimlicoApiKey) {
+      throw new Error('Pimlico API key is required');
+    }
+    
+    // Create bundler URL with our API key
+    const bundlerUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey}`;
+    
+    // Try multiple RPC endpoints if needed
+    const pimlicoClient = await withRetry(
+      async () => {
+        return createPimlicoClient({
+          transport: http(bundlerUrl),
+          entryPoint: {
+            address: ENTRY_POINT_ADDRESS,
+            version: "0.6" as const,
+          },
+        });
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 1000
+      }
+    );
+    
+    // Create the smart account client with retries
+    const smartAccountClient = await withRetry(
+      async () => {
+        // Use any type to bypass TypeScript errors due to library version differences
+        const clientConfig: any = {
+          account: smartAccount,
+          chain: sepolia,
+          bundlerTransport: http(bundlerUrl),
+          middleware: {
+            sponsorUserOperation: async (args: any) => {
+              try {
+                if (!pimlicoClient.sponsorUserOperation) {
+                  throw new Error('Pimlico client not properly initialized');
+                }
+                
+                // Also use any for the sponsorUserOperation parameters
+                const sponsorParams: any = {
+                  userOperation: args.userOperation,
+                  entryPoint: ENTRY_POINT_ADDRESS,
+                };
+                
+                return await pimlicoClient.sponsorUserOperation(sponsorParams);
+              } catch (err) {
+                console.error('Sponsorship error:', err);
+                throw err;
+              }
+            }
+          }
+        };
+        
+        return createSmartAccountClient(clientConfig);
+      },
+      {
+        maxRetries: 3,
+        initialDelay: 1000
+      }
+    );
+    
+    console.log('Created Smart Account Client');
+    
+    // Update the user's wallet address
+    updateUserFn(userId, smartAccount.address);
+    
+    // Return the smart account info
+    return {
+      address: smartAccount.address,
+      smartAccount,
+      smartAccountClient,
+      publicClient,
+      pimlicoClient,
+      owner
+    };
+  } catch (error) {
+    console.error('Failed to create permissionless Smart Contract Account:', error);
     throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+// Helper function to get permissionless version
+function getPermissionlessVersion() {
+  try {
+    const permissionless = require('permissionless/package.json');
+    return permissionless.version;
+  } catch (e) {
+    return 'unknown';
+  }
+}
+
+// Helper function to list available account functions
+function getAvailableAccountFunctions() {
+  try {
+    const permissionless = require('permissionless');
+    if (permissionless && permissionless.accounts) {
+      return Object.keys(permissionless.accounts);
+    }
+    return [];
+  } catch (e) {
+    return [];
   }
 }
 
@@ -403,17 +629,29 @@ export function findUserById(userId: string): UserAccount | undefined {
   // For development, return a mock user if none found
   if (!user && process.env.NODE_ENV !== 'production') {
     console.log(`Creating mock user for ID: ${userId}`);
+    
+    // Default private key for testing (hardhat #0)
+    const defaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
+    
+    // Create a mock user with encrypted keys
     const mockUser: UserAccount = {
       id: userId,
       username: `test_${userId.substring(0, 5)}`,
       authType: 'biometric',
       createdAt: new Date().getTime(),
-      wallets: [], // Add missing wallets array
+      wallets: [], // Empty wallets array
+      
+      // Properly encrypt the private key using the user ID as the password
+      biometricKey: encryptPrivateKey(defaultPrivateKey, userId),
+      
+      // Also add server key
       serverKey: encryptPrivateKey(
-        '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
+        defaultPrivateKey, 
         process.env.KEY_ENCRYPTION_KEY || 'default_key'
       )
     };
+    
+    console.log(`Created mock user with encrypted biometric key`);
     userAccounts.push(mockUser);
     saveUserData();
     return mockUser;
@@ -838,4 +1076,16 @@ export function setDefaultWallet(userId: string, walletAddress: Address): void {
 }
 
 // Initialize storage on module load
-initializeStorage(); 
+initializeStorage();
+
+// Add this function to update a user's wallet address
+function updateUserWalletAddress(userId: string, walletAddress: Address) {
+  const user = findUserById(userId);
+  if (user) {
+    user.walletAddress = walletAddress;
+    updateUser(user);
+    console.log(`Updated wallet address for user ${userId}: ${walletAddress}`);
+  } else {
+    console.error(`Cannot update wallet address: User ${userId} not found`);
+  }
+} 
