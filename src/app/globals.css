@@ -2,6 +2,18 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Import Google Fonts - Figtree */
+@import url('https://fonts.googleapis.com/css2?family=Figtree:wght@400;500;600;700&display=swap');
+
+/* Load local font for the logo */
+@font-face {
+  font-family: 'CoFoSansPixel';
+  src: url('/fonts/CoFoSansPixel-Regular.otf') format('opentype');
+  font-weight: normal;
+  font-style: normal;
+  font-display: swap;
+}
+
 @layer base {
   :root {
     --background: 0 0% 0%;
@@ -56,5 +68,10 @@
   
   html, body {
     @apply h-full;
+    font-family: 'Figtree', sans-serif;
+  }
+
+  .logo-text {
+    font-family: 'CoFoSansPixel', monospace;
   }
 }

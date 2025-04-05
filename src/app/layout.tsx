@@ -1,8 +1,5 @@
 import type { Metadata } from "next";
-import { Inter } from "next/font/google";
 import "./globals.css";
-
-const inter = Inter({ subsets: ["latin"] });
 
 export const metadata: Metadata = {
   title: "Nyx Wallet",
@@ -16,12 +13,12 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en">
-      <body className={inter.className}>
-        <div style={{ background: "black", color: "white", minHeight: "100vh" }}>
-          <header style={{ padding: "1rem 1.5rem", borderBottom: "1px solid #333" }}>
-            <div style={{ fontWeight: "bold" }}>nyx_wallet</div>
+      <body>
+        <div className="bg-black text-white min-h-screen flex flex-col">
+          <header className="py-4 px-6 border-b border-violet-500">
+            <div className="logo-text text-lg">nyx_wallet</div>
           </header>
-          <main>
+          <main className="flex-1 flex items-center justify-center">
             {children}
           </main>
         </div>
