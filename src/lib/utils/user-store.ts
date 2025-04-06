@@ -337,7 +337,8 @@ export async function createSmartAccountFromPrivateKey(privateKey: Hex): Promise
 export async function createSmartAccountFromCredential(
   userId: string,
   authenticationType: 'biometric' | 'passkey' = 'biometric',
-  forceCreate: boolean = false // Add parameter to control SCA creation
+  forceCreate: boolean = false, // Add parameter to control SCA creation
+  saltNonce?: bigint // Add salt nonce parameter to create different addresses
 ) {
   try {
     console.log(`Managing smart account for user ${userId} with ${authenticationType} authentication`);
@@ -348,7 +349,7 @@ export async function createSmartAccountFromCredential(
       throw new Error(`User ${userId} not found`);
     }
 
-    // Check if user already has a wallet address
+    // If forceCreate is false and user already has a wallet address, return it
     if (user.walletAddress && !forceCreate) {
       console.log(`User ${userId} already has a wallet address: ${user.walletAddress}`);
       return {
@@ -409,7 +410,8 @@ export async function createSmartAccountFromCredential(
         const result = await createPermissionlessSCA(
           userId, 
           decryptedKey, 
-          updateUserWalletAddress
+          updateUserWalletAddress,
+          saltNonce
         );
         
         // Update the user object with the new wallet address
@@ -457,7 +459,8 @@ export async function createSmartAccountFromCredential(
 async function createPermissionlessSCA(
   userId: string,
   privateKey: `0x${string}`,
-  updateUserFn: (userId: string, walletAddress: Address) => void
+  updateUserFn: (userId: string, walletAddress: Address, saltNonce?: bigint) => void,
+  saltNonce?: bigint
 ) {
   try {
     console.log('Creating permissionless SCA (JS) for owner');
@@ -492,11 +495,12 @@ async function createPermissionlessSCA(
         address: ENTRY_POINT_ADDRESS,
         version: "0.6" as const,
       },
-      saltNonce: BigInt(0),
+      saltNonce: saltNonce || BigInt(0),
       chainId: sepolia.id,
     };
     
     console.log('Creating Safe Smart Account with parameters...');
+    console.log(`Salt nonce being used: ${safeParams.saltNonce} (type: ${typeof safeParams.saltNonce})`);
     console.log('Safe Account Parameters:', JSON.stringify({
       client: 'PublicClient [OK]',
       owners: [`Owner (${owner.address})`],
@@ -576,8 +580,8 @@ async function createPermissionlessSCA(
     
     console.log('Created Smart Account Client');
     
-    // Update the user's wallet address
-    updateUserFn(userId, smartAccount.address);
+    // Update the user's wallet address - pass the saltNonce to store with the wallet
+    updateUserFn(userId, smartAccount.address, safeParams.saltNonce);
     
     // Return the smart account info
     return {
@@ -963,50 +967,101 @@ export function generateCombinedKey(
   return `0x${hash}` as Hex;
 }
 
-// Add a new wallet to a user
+// Add a wallet to a user
 export function addWalletToUser(
   userId: string, 
-  address: Address, 
-  name: string = 'My Wallet', 
-  chainId: number = 11155111 // Sepolia by default
-): Wallet {
+  walletAddress: Address, 
+  isDefault: boolean = false, 
+  name: string = 'New Wallet',
+  saltNonce?: bigint,
+  timestamp?: number
+): boolean {
   const user = findUserById(userId);
-  if (!user) {
-    throw new Error(`User ${userId} not found`);
-  }
+  if (!user) return false;
   
   // Initialize wallets array if it doesn't exist
   if (!Array.isArray(user.wallets)) {
     user.wallets = [];
   }
   
-  // Set the previous default wallet to non-default
-  if (user.wallets.length > 0) {
-    user.wallets.forEach(wallet => {
-      wallet.isDefault = false;
-    });
+  // Check if the wallet already exists
+  const walletExists = user.wallets.some(wallet => 
+    wallet.address.toLowerCase() === walletAddress.toLowerCase()
+  );
+  
+  if (walletExists) {
+    console.log(`Wallet ${walletAddress} already exists for user ${userId}`);
+    return false;
   }
   
-  // Create the new wallet
-  const newWallet: Wallet = {
-    address,
+  // If this is set as default, unset other default wallets
+  if (isDefault) {
+    user.wallets.forEach(wallet => wallet.isDefault = false);
+  }
+  
+  // Add the new wallet
+  const createdAt = timestamp || Date.now();
+  user.wallets.push({
+    address: walletAddress,
     name,
-    chainId,
-    isDefault: true,
-    createdAt: Date.now()
-  };
+    chainId: 11155111, // Sepolia
+    isDefault,
+    createdAt: createdAt,
+    saltNonce: saltNonce ? saltNonce.toString() : undefined
+  });
   
-  // Add the wallet to the user's wallets
-  user.wallets.push(newWallet);
+  // For backward compatibility, also set walletAddress property
+  if (isDefault || !user.walletAddress) {
+    user.walletAddress = walletAddress;
+  }
   
-  // For backward compatibility, also set as the main walletAddress
-  user.walletAddress = address;
-  
-  // Save changes
+  // Save the user
   updateUser(user);
+  console.log(`Added wallet ${walletAddress} to user ${userId}${saltNonce ? ` with salt nonce ${saltNonce}` : ''}, created at ${new Date(createdAt).toISOString()}`);
+  return true;
+}
+
+// Update wallet address for a user - modified to handle multiple wallets
+export function updateUserWalletAddress(
+  userId: string, 
+  walletAddress: Address, 
+  saltNonce?: bigint
+): void {
+  const user = findUserById(userId);
+  if (!user) {
+    console.error(`User ${userId} not found, can't update wallet address`);
+    return;
+  }
   
-  console.log(`Added new wallet ${address} to user ${userId}`);
-  return newWallet;
+  console.log(`updateUserWalletAddress: Adding wallet ${walletAddress} to user ${userId} with saltNonce ${saltNonce ? saltNonce.toString() : 'none'}`);
+  
+  // Check if this wallet address already exists (this shouldn't happen with different salt nonces)
+  const walletExists = user.wallets?.some(w => w.address.toLowerCase() === walletAddress.toLowerCase());
+  if (walletExists) {
+    console.log(`updateUserWalletAddress: Wallet ${walletAddress} already exists for user ${userId}`);
+  }
+  
+  // When creating a new wallet with a salt nonce, add it to the wallets array
+  // with a unique timestamp to ensure it's properly sorted
+  const timestamp = Date.now();
+  
+  // For new implementation, add to wallets array as a new wallet
+  const wasAdded = addWalletToUser(
+    userId, 
+    walletAddress, 
+    saltNonce ? false : true, // Only set as default if not creating a new wallet with salt
+    saltNonce ? `New Wallet (${new Date().toLocaleTimeString()})` : 'Primary Wallet', 
+    saltNonce,
+    timestamp
+  );
+  
+  // For backward compatibility, set walletAddress property if this is default or no other wallet exists
+  if (!user.walletAddress || !saltNonce) {
+    user.walletAddress = walletAddress;
+  }
+  
+  updateUser(user);
+  console.log(`updateUserWalletAddress: Updated user ${userId} with wallet address ${walletAddress} (default: ${!saltNonce}, timestamp: ${timestamp})`);
 }
 
 // Get all wallets for a user
@@ -1038,8 +1093,45 @@ export function getWalletsForUser(userId: string): Wallet[] {
 
 // Get the default wallet for a user
 export function getDefaultWallet(userId: string): Wallet | undefined {
-  const wallets = getWalletsForUser(userId);
-  return wallets.find(wallet => wallet.isDefault) || wallets[0];
+  const user = findUserById(userId);
+  if (!user) {
+    return undefined;
+  }
+  
+  // First check for wallets in the wallets array
+  if (user.wallets && user.wallets.length > 0) {
+    // Return the default wallet if one is marked as default
+    const defaultWallet = user.wallets.find(wallet => wallet.isDefault === true);
+    if (defaultWallet) {
+      return defaultWallet;
+    }
+    
+    // If no wallet is marked as default, return the first one
+    return user.wallets[0];
+  }
+  
+  // If there are no wallets in the wallets array but there is a legacy walletAddress,
+  // create a wallet object from it and return it
+  if (user.walletAddress) {
+    const legacyWallet: Wallet = {
+      address: user.walletAddress,
+      name: 'Primary Wallet',
+      chainId: 11155111, // Sepolia
+      isDefault: true,
+      createdAt: user.createdAt
+    };
+    
+    // Add this wallet to the user's wallets array for future use
+    if (!user.wallets) {
+      user.wallets = [];
+    }
+    user.wallets.push(legacyWallet);
+    saveUserData();
+    
+    return legacyWallet;
+  }
+  
+  return undefined;
 }
 
 // Set a wallet as the default for a user
@@ -1078,14 +1170,120 @@ export function setDefaultWallet(userId: string, walletAddress: Address): void {
 // Initialize storage on module load
 initializeStorage();
 
-// Add this function to update a user's wallet address
-function updateUserWalletAddress(userId: string, walletAddress: Address) {
+// Helper function to find the next nonce value for a user
+export function getNextSaltNonce(userId: string): bigint {
   const user = findUserById(userId);
-  if (user) {
-    user.walletAddress = walletAddress;
-    updateUser(user);
-    console.log(`Updated wallet address for user ${userId}: ${walletAddress}`);
-  } else {
-    console.error(`Cannot update wallet address: User ${userId} not found`);
+  if (!user) {
+    return BigInt(0);
+  }
+  
+  // Initialize wallets array if it doesn't exist
+  if (!Array.isArray(user.wallets)) {
+    user.wallets = [];
+  }
+  
+  // Find the highest salt nonce used so far
+  let highestNonce = BigInt(0);
+  user.wallets.forEach(wallet => {
+    if (wallet.saltNonce && BigInt(wallet.saltNonce) > highestNonce) {
+      highestNonce = BigInt(wallet.saltNonce);
+    }
+  });
+  
+  // Return next nonce
+  return highestNonce + BigInt(1);
+}
+
+// Get the newest wallet for a user based on creation time
+export function getNewestWallet(userId: string): Wallet | undefined {
+  const user = findUserById(userId);
+  if (!user) {
+    console.log(`getNewestWallet: User ${userId} not found`);
+    return undefined;
+  }
+  
+  // First check for wallets in the wallets array
+  if (user.wallets && user.wallets.length > 0) {
+    console.log(`getNewestWallet: Found ${user.wallets.length} wallet(s) for user ${userId}`);
+    
+    // Debug: Log all wallets with creation times
+    user.wallets.forEach((wallet, index) => {
+      const createdDate = new Date(wallet.createdAt).toISOString();
+      console.log(`getNewestWallet: Wallet #${index} - Address: ${wallet.address}, CreatedAt: ${createdDate}, SaltNonce: ${wallet.saltNonce || 'none'}`);
+    });
+    
+    // Return the wallet with the most recent creation time
+    const newestWallet = user.wallets.reduce((newest, current) => {
+      if (!newest || current.createdAt > newest.createdAt) {
+        return current;
+      }
+      return newest;
+    }, undefined as Wallet | undefined);
+    
+    if (newestWallet) {
+      console.log(`getNewestWallet: Selected newest wallet: ${newestWallet.address}, CreatedAt: ${new Date(newestWallet.createdAt).toISOString()}`);
+    } else {
+      console.log(`getNewestWallet: No newest wallet found despite having wallets array`);
+    }
+    
+    return newestWallet;
+  }
+  
+  // If there are no wallets in the wallets array but there is a legacy walletAddress,
+  // create a wallet object from it and return it
+  if (user.walletAddress) {
+    const legacyWallet: Wallet = {
+      address: user.walletAddress,
+      name: 'Primary Wallet',
+      chainId: 11155111, // Sepolia
+      isDefault: true,
+      createdAt: user.createdAt
+    };
+    
+    // Add this wallet to the user's wallets array for future use
+    if (!user.wallets) {
+      user.wallets = [];
+    }
+    user.wallets.push(legacyWallet);
+    saveUserData();
+    
+    return legacyWallet;
+  }
+  
+  return undefined;
+}
+
+// Get the recovery key for a user (for returning to UI when creating additional wallets)
+export async function getRecoveryKeyForUser(userId: string): Promise<string | null> {
+  try {
+    console.log(`Getting recovery key for user ${userId}`);
+    
+    // Find the user
+    const user = findUserById(userId);
+    if (!user) {
+      console.error(`User ${userId} not found when retrieving recovery key`);
+      return null;
+    }
+    
+    // If there's no recovery key hash, there's no stored recovery key
+    if (!user.recoveryKeyHash) {
+      console.log(`No recovery key hash found for user ${userId}`);
+      return null;
+    }
+    
+    // In a real implementation, we would retrieve the recovery key from a secure storage
+    // For development purposes, we'll simulate retrieving a recovery key
+    // In production, this would be securely stored and encrypted
+    if (process.env.NODE_ENV !== 'production') {
+      // This is just for testing in development - in production you would use proper key retrieval
+      const mockRecoveryKey = `recovery_key_for_${userId}`;
+      return mockRecoveryKey;
+    }
+    
+    // For production, we'd need a secure method to retrieve or regenerate the recovery key
+    return null;
+  } catch (error) {
+    console.error('Error retrieving recovery key:', error);
+    return null;
   }
 } 

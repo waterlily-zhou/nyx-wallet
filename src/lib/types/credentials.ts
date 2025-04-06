@@ -44,4 +44,5 @@ export interface Wallet {
   chainId: number;
   isDefault: boolean;
   createdAt: number;
+  saltNonce?: string; // Salt nonce used to generate this wallet address
 } 

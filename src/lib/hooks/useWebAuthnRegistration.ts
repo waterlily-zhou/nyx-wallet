@@ -13,6 +13,7 @@ interface RegistrationResult {
   success: boolean;
   walletAddress?: string;
   recoveryKey?: string;
+  userId?: string;
   error?: string;
 }
 
@@ -87,6 +88,7 @@ export function useWebAuthnRegistration() {
         success: true,
         walletAddress: verificationData.walletAddress,
         recoveryKey: verificationData.recoveryKey,
+        userId: verificationData.userId,
       };
       
       setRegistrationResult(result);

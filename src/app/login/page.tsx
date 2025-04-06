@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useBiometricAuth } from '@/lib/hooks/useBiometricAuth';
 import { useWebAuthnRegistration } from '@/lib/hooks/useWebAuthnRegistration';
+import WalletCreationHandler from './WalletCreationHandler';
 
 export default function LoginPage() {
   const router = useRouter();
@@ -18,6 +19,13 @@ export default function LoginPage() {
   const [showRecoveryKey, setShowRecoveryKey] = useState(false);
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const [walletAddress, setWalletAddress] = useState<string | null>(null);
+  const [authenticatedUserId, setAuthenticatedUserId] = useState<string | null>(null);
+  const [showCreationHelper, setShowCreationHelper] = useState(false);
+  const [showExistingWalletOptions, setShowExistingWalletOptions] = useState(false);
+  const [createNewWallet, setCreateNewWallet] = useState(false);
+  const [existingWalletAddress, setExistingWalletAddress] = useState<string | null>(null);
+  const [createdWalletAddress, setCreatedWalletAddress] = useState<string | null>(null);
+  const [createdWalletRecoveryKey, setCreatedWalletRecoveryKey] = useState<string | null>(null);
   
   useEffect(() => {
     // Check if there's a saved wallet
@@ -43,8 +51,28 @@ export default function LoginPage() {
       setRecoveryKey(registrationResult.recoveryKey);
       setWalletAddress(registrationResult.walletAddress || null);
       setShowRecoveryKey(true);
+      
+      // Store recovery key in localStorage for potential retrieval later
+      if (registrationResult.recoveryKey) {
+        try {
+          localStorage.setItem(
+            `recovery_key_${registrationResult.userId || 'default'}`, 
+            registrationResult.recoveryKey
+          );
+        } catch (e) {
+          console.error('Failed to store recovery key:', e);
+        }
+      }
     }
   }, [registrationResult]);
+  
+  // If we have an authenticated user ID and an error or loading state persists,
+  // show the wallet creation handler to check real status
+  useEffect(() => {
+    if (authenticatedUserId && (error || isCreatingWallet)) {
+      setShowCreationHelper(true);
+    }
+  }, [authenticatedUserId, error, isCreatingWallet]);
   
   const addDebugLog = (message: string) => {
     console.log(message);
@@ -87,6 +115,11 @@ export default function LoginPage() {
         throw new Error('Failed to get authentication challenge');
       }
 
+      // First check if there's a biometric credential registered
+      if (!challengeData.walletVerification) {
+        throw new Error('No biometric credential found. Please create a wallet first.');
+      }
+
       addDebugLog(`Challenge received, wallet verification: ${challengeData.walletVerification ? 'Yes' : 'No'}`);
 
       // Authenticate with biometrics
@@ -118,13 +151,62 @@ export default function LoginPage() {
         
         // If the error indicates the user needs to create a wallet
         if (errorData.needsWalletCreation) {
+          // User has a biometric credential but no wallet - ask if they want to create one
           addDebugLog('No wallet found for this user. Prompting to create one.');
+          
+          // Store user ID for later use
+          setAuthenticatedUserId(authResult.userId ?? null);
+          
+          // Set an informative message and offer to create a wallet
           setError('Your biometric credential has no wallet associated with it. Please create a wallet first.');
+          
+          // Show the creation handler
+          setShowCreationHelper(true);
+          setCreateNewWallet(false);
+          
+          // Create a wallet using the existing authenticated user ID
+          const createWalletResponse = await fetch('/api/wallet/create', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({ 
+              userId: authResult.userId,
+              forceCreate: true
+            }),
+          });
+          
+          if (!createWalletResponse.ok) {
+            const errorData = await createWalletResponse.json();
+            throw new Error(errorData.error || 'Failed to create wallet with existing credential');
+          }
+          
           setIsSigningIn(false);
-          return; // Exit early - will need to create a wallet
+          return;
         }
       }
       
+      // Check if there are multiple wallets associated with this credential
+      if (loadWalletResponse.ok) {
+        const walletData = await loadWalletResponse.json();
+        
+        if (walletData.success) {
+          if (walletData.multipleWallets) {
+            // TODO: Implement wallet selection UI if needed
+            addDebugLog('Multiple wallets found for this credential');
+          }
+          
+          // Success - proceed to dashboard
+          addDebugLog(`Wallet loaded: ${walletData.wallet.address}`);
+          setError(null);
+          
+          // Redirect to dashboard
+          router.push('/');
+          return;
+        }
+      }
+      
+      // Handle other errors
       if (!loadWalletResponse.ok) {
         // Special handling for rate limits
         if (loadWalletResponse.status === 429) {
@@ -135,18 +217,6 @@ export default function LoginPage() {
         const errorText = await loadWalletResponse.text();
         throw new Error(`Failed to load wallet: ${errorText}`);
       }
-      
-      const walletData = await loadWalletResponse.json();
-      
-      if (!walletData.success) {
-        throw new Error(walletData.error || 'Failed to load wallet');
-      }
-      
-      addDebugLog(`Wallet loaded: ${walletData.wallet.address}`);
-      setError(null);
-      
-      // Redirect to dashboard
-      router.push('/');
     } catch (err) {
       console.error('Authentication error:', err);
       const errorMsg = formatError(err);
@@ -157,33 +227,191 @@ export default function LoginPage() {
     }
   };
   
-  const createWallet = async () => {
+  const checkBiometricCredential = async () => {
     try {
       setIsCreatingWallet(true);
       setError(null);
-      addDebugLog('Creating new wallet...');
+      addDebugLog('Checking for existing biometric credentials...');
       
-      // Generate a default username based on timestamp
-      const defaultUsername = `user_${Date.now()}`;
-      
-      // Use WebAuthn registration with better error handling
-      addDebugLog('Starting WebAuthn registration process');
-      setError('Setting up WebAuthn key, please follow the prompts...');
-      
-      // First phase: Register the WebAuthn credential
-      const result = await register({ username: defaultUsername });
-      
-      if (!result.success) {
-        throw new Error(result.error || 'Failed to create wallet');
+      // First check if the user has existing WebAuthn credentials
+      const challengeResponse = await fetch('/api/auth/challenge');
+      if (!challengeResponse.ok) {
+        throw new Error('Failed to get challenge for credential check');
       }
       
-      addDebugLog('WebAuthn registration successful');
-      setError('Connecting to Sepolia blockchain, this may take a moment...');
+      const challengeData = await challengeResponse.json();
       
-      // Registration result will be handled in the useEffect
-      // It will display the recovery key to the user
-      addDebugLog('Wallet creation initiated, waiting for blockchain confirmation');
+      // If walletVerification is true, it means there's a credential
+      if (challengeData.walletVerification) {
+        addDebugLog('Found existing biometric credential, authenticating...');
+        
+        // Try to authenticate with existing biometric credential
+        const authResult = await authenticateWithBiometrics(challengeData.challenge);
+        
+        if (!authResult.success) {
+          throw new Error(authResult.error || 'Authentication failed');
+        }
+        
+        addDebugLog(`Authenticated with existing credential, user ID: ${authResult.userId}`);
+        
+        // First check if the user already has a wallet
+        const checkWalletResponse = await fetch('/api/wallet/load', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            userId: authResult.userId 
+          }),
+        });
+        
+        if (checkWalletResponse.ok) {
+          const walletData = await checkWalletResponse.json();
+          
+          if (walletData.success && walletData.wallet && walletData.wallet.address) {
+            // User has an existing wallet - ask if they want to use it or create a new one
+            const walletAddress = walletData.wallet.address;
+            const shortenedAddress = `${walletAddress.substring(0, 6)}...${walletAddress.substring(38)}`;
+            
+            // Clear any error message as this is not really an error
+            setError(null);
+            
+            // Store user ID for later use
+            setAuthenticatedUserId(authResult.userId ?? null);
+            
+            // Show the existing wallet options
+            setShowExistingWalletOptions(true);
+            setIsCreatingWallet(false);
+            addDebugLog(`Found existing wallet: ${walletAddress}. Showing options.`);
+            setExistingWalletAddress(walletAddress);
+            return;
+          }
+        }
+        
+        // If we get here, there's a credential but no wallet associated with it
+        addDebugLog('Credential exists but no wallet found. Creating new wallet with existing credential.');
+        
+        // Use this authenticated credential to create a new wallet
+        setError(null);
+        
+        // Store user ID for helper component
+        setAuthenticatedUserId(authResult.userId ?? null);
+        
+        // Show the creation handler to track real-time status
+        setShowCreationHelper(true);
+        setCreateNewWallet(false);
+        
+        // Create a wallet using the existing authenticated user ID
+        const createWalletResponse = await fetch('/api/wallet/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            userId: authResult.userId,
+            forceCreate: true
+          }),
+        });
+        
+        if (!createWalletResponse.ok) {
+          const errorData = await createWalletResponse.json();
+          throw new Error(errorData.error || 'Failed to create wallet with existing credential');
+        }
+        
+        return;
+      } else {
+        // No existing credential, so register a new one and create a wallet
+        addDebugLog('No existing credential found. Starting WebAuthn registration process');
+        
+        // Generate a default username based on timestamp
+        const defaultUsername = `user_${Date.now()}`;
+        
+        // First phase: Register the WebAuthn credential
+        const result = await register({ username: defaultUsername });
+        
+        if (!result.success) {
+          throw new Error(result.error || 'Failed to create wallet');
+        }
+        
+        addDebugLog('WebAuthn registration successful');
+        setError('Connecting to Sepolia blockchain, this may take a moment...');
+      }
+    } catch (err) {
+      console.error('Credential check error:', err);
+      const errorMsg = formatError(err);
+      addDebugLog(`Error: ${errorMsg}`);
+      setError(errorMsg);
+    } finally {
+      setIsCreatingWallet(false);
+    }
+  };
+  
+  const createWallet = async (createNew = false) => {
+    try {
+      setIsCreatingWallet(true);
+      setError(null);
+      setCreateNewWallet(createNew);
+      addDebugLog('Creating new wallet with existing credential...');
       
+      // If we're here from the "Create New Wallet" option on the existing wallet panel,
+      // we already have the authenticatedUserId
+      if (createNew && authenticatedUserId) {
+        // Force a random salt nonce for new wallet
+        const randomSalt = Math.floor(Math.random() * 1000000) + 1;
+        addDebugLog(`Using random salt nonce: ${randomSalt} to force new wallet address`);
+        
+        // Show the creation helper with createNewWallet flag set to true
+        setShowCreationHelper(true);
+        
+        // Clear any old wallet address from previous creation
+        setExistingWalletAddress(null);
+        
+        // Create a wallet using the existing authenticated user ID
+        const createWalletResponse = await fetch('/api/wallet/create', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({ 
+            userId: authenticatedUserId,
+            forceCreate: true,
+            createNewWallet: true,
+            randomSalt: randomSalt
+          }),
+        });
+        
+        if (!createWalletResponse.ok) {
+          const errorData = await createWalletResponse.json();
+          throw new Error(errorData.error || 'Failed to create new wallet with existing credential');
+        }
+        
+        const walletData = await createWalletResponse.json();
+        
+        // Store the wallet address directly in state
+        if (walletData.walletAddress) {
+          addDebugLog(`New wallet address created: ${walletData.walletAddress}`);
+          
+          // Set the new wallet address directly in state for the creation handler to use
+          setCreatedWalletAddress(walletData.walletAddress);
+          
+          // Clear any previous wallet address
+          setExistingWalletAddress(null);
+        }
+        
+        // Store recovery key directly in state
+        if (walletData.recoveryKey) {
+          addDebugLog(`Got recovery key for wallet ${walletData.walletAddress}`);
+          setCreatedWalletRecoveryKey(walletData.recoveryKey);
+        } else {
+          addDebugLog('Warning: No recovery key received from API for the new wallet');
+        }
+        
+        return;
+      }
+      
+      // For new users, let the checkBiometricCredential handle the flow
+      setIsCreatingWallet(false);
+      checkBiometricCredential();
     } catch (err) {
       console.error('Wallet creation error:', err);
       const errorMsg = formatError(err);
@@ -251,14 +479,68 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="max-w-md w-full p-4">
-      {error && (
+    <div className="w-full max-w-md mx-auto my-auto">
+      {error && !showCreationHelper && (
         <div className="p-4 bg-red-900/50 border border-red-600 rounded-lg text-center text-white mb-4">
           {error}
         </div>
       )}
       
-      <div className="grid gap-4">
+      {/* Show helper component when wallet creation is in progress */}
+      {showCreationHelper && authenticatedUserId ? (
+        <WalletCreationHandler 
+          userId={authenticatedUserId} 
+          createNewWallet={createNewWallet}
+          createdWalletAddress={createdWalletAddress}
+          createdWalletRecoveryKey={createdWalletRecoveryKey}
+        />
+      ) : showExistingWalletOptions && authenticatedUserId ? (
+        <div className="bg-gray-900 border border-violet-500 rounded-lg p-6">
+          <p className="mb-3 text-center">You have an existing wallet:</p>
+          
+          {existingWalletAddress && (
+            <div className="bg-gray-800 p-3 rounded-lg text-center mb-6 font-mono text-sm overflow-hidden">
+              {existingWalletAddress}
+            </div>
+          )}
+          
+          <div className="flex flex-col gap-4">
+            <button 
+              onClick={() => {
+                // Just show the wallet creation handler with the existing wallet
+                setShowCreationHelper(true);
+                setCreateNewWallet(false);
+                setShowExistingWalletOptions(false);
+              }}
+              className="py-3 px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center justify-center"
+            >
+              Use This Wallet
+            </button>
+            
+            <div className="relative flex items-center my-2">
+              <div className="flex-grow border-t border-gray-600"></div>
+              <span className="flex-shrink mx-4 text-gray-400 text-sm">OR</span>
+              <div className="flex-grow border-t border-gray-600"></div>
+            </div>
+            
+            <button 
+              onClick={() => {
+                // Create a new wallet with the same biometric credential
+                setShowExistingWalletOptions(false);
+                setCreateNewWallet(true);
+                createWallet(true);
+              }}
+              className="py-3 px-4 bg-black border border-violet-500 text-violet-500 rounded-lg hover:border-violet-600 flex items-center justify-center"
+            >
+              <svg className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+              </svg>
+              Create A New Wallet
+            </button>
+          </div>
+        </div>
+      ) : (
+        <div className="grid gap-4">
           <button 
             onClick={handleBiometricAuth}
             disabled={isSigningIn || isCreatingWallet}
@@ -296,8 +578,6 @@ export default function LoginPage() {
               <div className="text-xs mt-1 text-gray-200">(FaceID / fingerprint)</div>
             </div>
           </button>
-
-        <div className="flex flex-col gap-4">
           <button
             onClick={addExistingWallet}
             disabled={isSigningIn || isCreatingWallet}
@@ -310,7 +590,7 @@ export default function LoginPage() {
           </button>
           
           <button
-            onClick={createWallet}
+            onClick={() => checkBiometricCredential()}
             disabled={isSigningIn || isCreatingWallet || isRegistering}
             className="w-full bg-black border border-violet-500 text-violet-500 py-4 px-4 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:border-violet-700 disabled:opacity-50"
           >
@@ -327,7 +607,7 @@ export default function LoginPage() {
             <div>Create a new wallet</div>
           </button>
         </div>
-      </div>
+      )}
       
       <div className="mt-4 text-center">
         <button

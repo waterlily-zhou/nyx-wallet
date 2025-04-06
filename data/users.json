@@ -1172,15 +1172,88 @@
     "username": "test_test_",
     "authType": "biometric",
     "createdAt": 1743797887262,
-    "wallets": [],
+    "wallets": [
+      {
+        "address": "0xA3d80B153a9014dEF8fDF52C13b21d7C0CE9452d",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743939245394
+      }
+    ],
     "serverKey": "U2FsdGVkX19Lf06XaIpmf+sQ8rsFX+84Mhqb3EKDkB8ULRgsLy779UMY3JHP2gpfMKsX7DGwCQDKS8fIr1eDss5HRoOWZlsK4aITHpKGddo6aJ9SqyApi3wvIRA5AwSn",
-    "biometricKey": "U2FsdGVkX1+8a6K8/foinxOx5Ei6pJbBLU96IokPNZDeEJOlJ+FYjEe0UpoDiQ/2J1zh5eqFvsW5zUjQlqsMfKepI/w2GUDLcu9JpPUyke05VdoT9fECOs13+jyyA6po"
+    "biometricKey": "U2FsdGVkX1+8a6K8/foinxOx5Ei6pJbBLU96IokPNZDeEJOlJ+FYjEe0UpoDiQ/2J1zh5eqFvsW5zUjQlqsMfKepI/w2GUDLcu9JpPUyke05VdoT9fECOs13+jyyA6po",
+    "walletAddress": "0xA3d80B153a9014dEF8fDF52C13b21d7C0CE9452d"
   },
   {
     "id": "user_1743866153384_pmkyowr",
     "username": "user_1743866152910",
     "authType": "biometric",
-    "wallets": [],
+    "wallets": [
+      {
+        "address": "0x3ACF0c3f6156AD4b38D8ff62902025015eF2ae5d",
+        "name": "New Wallet",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743934003160
+      },
+      {
+        "address": "0x1f6f59b7413Ed2B43dACf73d18622102b9Fa769E",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743935965705,
+        "saltNonce": "742221"
+      },
+      {
+        "address": "0x090b63487f2A753371d2650aFe3F14Cb8194f620",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743936225711,
+        "saltNonce": "113340"
+      },
+      {
+        "address": "0x57263023ffAbFD48F0491F758CeD5f295Aaa98C8",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743936512524,
+        "saltNonce": "872"
+      },
+      {
+        "address": "0x8b20456C36E492c944ADC12A32ED1A4b2B973B3B",
+        "name": "New Wallet (11:52:36 AM)",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743936756771,
+        "saltNonce": "874964"
+      },
+      {
+        "address": "0x7C6D39fA7559f92F8c45d7588b16b42b56760352",
+        "name": "New Wallet (11:59:45 AM)",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743937185238,
+        "saltNonce": "135690"
+      },
+      {
+        "address": "0x96E337cd650A9C5EE95c93043683f66dC1C3C61E",
+        "name": "New Wallet (12:02:18 PM)",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743937338312,
+        "saltNonce": "625645"
+      },
+      {
+        "address": "0xAE2cF0DB9476aeD4F0AE51C8fFe4175831ad611c",
+        "name": "New Wallet (12:05:15 PM)",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743937515684,
+        "saltNonce": "189895"
+      }
+    ],
     "authenticators": [],
     "credentials": [],
     "createdAt": 1743866153384,
@@ -1193,7 +1266,7 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "990b43ced5edf0be24056588b6f70973c4d4e2297c19876aecfe77209468e69d",
-    "walletAddress": "0xB6E897704689aA039B1eE791FBCcD0D7A66A20B1"
+    "walletAddress": "0xAE2cF0DB9476aeD4F0AE51C8fFe4175831ad611c"
   },
   {
     "id": "user_1743867991560_zzu3x14",
@@ -1204,5 +1277,23 @@
     "credentials": [],
     "createdAt": 1743867991560,
     "biometricKey": "U2FsdGVkX1/6R3w6mngg4m3WxUs2bDaBE9qaJfkcrb/7fNVXrCF5XdTeIBPOMtLqFrr4eRgzwtZq+MhmWF6xEyo0ZeOcgKzXj9jSYHbJiNiBCnXs9puTdwr0/f+xHnQ7"
+  },
+  {
+    "id": "user_1743931736239_ykgl2r3",
+    "username": "user_1743931734775",
+    "authType": "biometric",
+    "wallets": [],
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": 1743931736239
+  },
+  {
+    "id": "test_user_123",
+    "username": "test_test_",
+    "authType": "biometric",
+    "createdAt": 1743933463551,
+    "wallets": [],
+    "biometricKey": "U2FsdGVkX19QT0d8Dfhkvs/gJEANmINco+ed6qBVeIMiAzY5Aa/a998hv1wNHc76Yh1Jl8MG4GxX7BQH5VUb5qkN1XNDRYJ1EV0pHNdxGRCjYsJM5dDXYtKo8uOHbGPl",
+    "serverKey": "U2FsdGVkX18iqYVFH2OP14IfBsJH5K58cwt02fjSLqsQCGZUqpgKCGr8py9DqaQhGpUN25Erjc1D30SmYy1bAP3CnlM22UuNk2Z9SUqmctzmBuIh9AqLlvkN9MWBLxVR"
   }
 ]
