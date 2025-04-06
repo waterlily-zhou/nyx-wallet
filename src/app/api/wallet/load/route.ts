@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { findUserById, getDefaultWallet, getNewestWallet } from '@/lib/utils/user-store';
+import { findUserById } from '@/lib/utils/user-store';
+import { supabase } from '@/lib/supabase/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +19,8 @@ export async function POST(request: NextRequest) {
     
     console.log(`API: Loading wallet for user ${userId}, includeNewWallet: ${includeNewWallet}`);
     
-    // Get user from storage
-    const user = findUserById(userId);
+    // Get user from Supabase
+    const user = await findUserById(userId);
     if (!user) {
       return NextResponse.json({ 
         success: false, 
@@ -27,14 +28,22 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
     
-    // Check if user has wallets in the wallets array or a legacy walletAddress
-    const wallet = includeNewWallet 
-      ? getNewestWallet(userId)  // Get newest wallet if specifically looking for new wallet
-      : getDefaultWallet(userId);  // Otherwise get default wallet
+    // Get wallets from Supabase
+    const { data: wallets, error: walletError } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
     
-    const legacyWallet = user.walletAddress;
+    if (walletError) {
+      console.error('API: Error loading wallets:', walletError);
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Error loading wallets'
+      }, { status: 500 });
+    }
     
-    if (!wallet && !legacyWallet) {
+    if (!wallets || wallets.length === 0) {
       console.log(`API: User ${userId} does not have a wallet`);
       return NextResponse.json({ 
         success: false, 
@@ -43,19 +52,28 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
     
-    // Use the selected wallet from the wallets array or fall back to the legacy address
-    const walletAddress = wallet?.address || legacyWallet || '';
+    // Get the wallet based on the request
+    let wallet;
+    if (includeNewWallet) {
+      // Get newest wallet by created_at date
+      wallet = wallets[0]; // Already sorted by created_at desc
+    } else {
+      // Get default wallet
+      wallet = wallets.find(w => w.is_default) || wallets[0];
+    }
+    
+    const walletAddress = wallet.address;
     
     console.log(`API: Loaded wallet for user ${userId}: ${walletAddress} (includeNewWallet: ${includeNewWallet})`);
     
     // Log all wallets for debugging
-    if (user.wallets && user.wallets.length > 0) {
-      console.log(`API: User has ${user.wallets.length} wallet(s):`);
-      user.wallets.forEach((w, index) => {
-        console.log(`API: Wallet #${index}: ${w.address}, created: ${new Date(w.createdAt).toISOString()}, saltNonce: ${w.saltNonce || 'none'}, isDefault: ${w.isDefault}`);
+    if (wallets.length > 0) {
+      console.log(`API: User has ${wallets.length} wallet(s):`);
+      wallets.forEach((w, index) => {
+        console.log(`API: Wallet #${index}: ${w.address}, created: ${w.created_at}, saltNonce: ${w.salt_nonce || 'none'}, isDefault: ${w.is_default}`);
       });
     } else {
-      console.log(`API: User has no wallets array or it's empty`);
+      console.log(`API: User has no wallets`);
     }
     
     // Set session cookies
@@ -86,14 +104,14 @@ export async function POST(request: NextRequest) {
     });
     
     // Check if the user has multiple wallets
-    const hasMultipleWallets = user.wallets && user.wallets.length > 1;
+    const hasMultipleWallets = wallets.length > 1;
     
     return NextResponse.json({
       success: true,
       wallet: {
         address: walletAddress,
-        name: wallet?.name || 'Primary Wallet',
-        chainId: wallet?.chainId || 11155111 // Default to Sepolia
+        name: wallet.name || 'Primary Wallet',
+        chainId: wallet.chain_id || 11155111 // Default to Sepolia
       },
       multipleWallets: hasMultipleWallets
     });

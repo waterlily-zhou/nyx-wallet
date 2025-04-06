@@ -1,8 +1,10 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { generateAuthenticationOptions, verifyAuthenticationResponse } from '@simplewebauthn/server';
-import { findAuthenticatorByCredentialId, rpID, origin, findUserById, getWalletsForUser, updateAuthenticator } from '@/lib/utils/user-store';
+import { findAuthenticatorByCredentialId, findUserById, getWalletsForUser } from '@/lib/utils/user-store';
+import { rpID, origin } from '@/lib/utils/user-store';
 import { setSessionCookie } from '@/lib/utils/auth-utils';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/typescript-types';
+import { supabase } from '@/lib/supabase/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -17,7 +19,7 @@ export async function POST(request: NextRequest) {
       const { credential, userId, challenge } = body;
       
       // Find the user and their authenticator
-      const user = findUserById(userId);
+      const user = await findUserById(userId);
       if (!user) {
         console.error(`User ${userId} not found during authentication verification`);
         return NextResponse.json({ 
@@ -29,7 +31,7 @@ export async function POST(request: NextRequest) {
       console.log(`Found user ${userId} for authentication verification`);
       
       // Find the authenticator by the credential ID
-      const authenticator = findAuthenticatorByCredentialId(credential.id);
+      const authenticator = await findAuthenticatorByCredentialId(credential.id);
       if (!authenticator) {
         console.error(`Authenticator with credential ID ${credential.id} not found`);
         return NextResponse.json({ 
@@ -47,7 +49,7 @@ export async function POST(request: NextRequest) {
       let verification;
       try {
         verification = await verifyAuthenticationResponse({
-          credential: credential as AuthenticationResponseJSON,
+          credential: credential as unknown as AuthenticationResponseJSON,
           expectedChallenge,
           expectedOrigin: origin,
           expectedRPID: rpID,
@@ -65,14 +67,21 @@ export async function POST(request: NextRequest) {
       
       // If verification was successful, update the authenticator counter
       if (verification.verified) {
-        authenticator.counter = verification.authenticationInfo.newCounter;
-        authenticator.lastUsed = new Date();
+        // Update the authenticator in Supabase
+        const { error: updateError } = await supabase
+          .from('authenticators')
+          .update({
+            counter: verification.authenticationInfo.newCounter,
+            last_used: new Date().toISOString()
+          })
+          .eq('credential_id', credential.id);
         
-        // Update the authenticator in storage
-        updateAuthenticator(authenticator);
+        if (updateError) {
+          console.error('Error updating authenticator counter:', updateError);
+        }
         
         // Get all wallets for this user
-        const wallets = getWalletsForUser(userId);
+        const wallets = await getWalletsForUser(userId);
         
         // Create the response with success, user ID, wallet address, etc.
         const response = NextResponse.json({

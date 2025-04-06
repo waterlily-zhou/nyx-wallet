@@ -87,7 +87,15 @@ export default function WalletCreationHandler({
           const statusData = await creationStatusResponse.json();
           console.log('Wallet creation status response:', statusData);
           
-          // Check for wallet address mismatch - the wallet we receive should be the new one if createNewWallet is true
+          // Check if we're getting a "no wallet" error consistently
+          if (!statusData.success && statusData.error && statusData.error.includes('No wallet creation process found')) {
+            console.log('No wallet found and no creation process active - stopping polling');
+            // Stop polling after confirming user doesn't have a wallet
+            clearInterval(intervalId);
+            return;
+          }
+          
+          // Check for wallet address - if we have one, we're done
           if (statusData.success && statusData.wallet && statusData.wallet.address) {
             if (createNewWallet && walletAddress !== null && walletAddress !== statusData.wallet.address) {
               console.log(`Wallet address mismatch: UI has ${walletAddress}, latest response has ${statusData.wallet.address}`);
@@ -164,8 +172,20 @@ export default function WalletCreationHandler({
             return;
           }
         } else if (loadResponse.status === 404) {
-          // Wallet not found yet - this is normal during creation
-          // Keep the current message about wallet creation
+          // Wallet not found - stop polling after confirming
+          const errorData = await loadResponse.json();
+          if (errorData.needsWalletCreation) {
+            console.log('No wallet found for this user - stopping polling');
+            // Stop polling since we've confirmed the user needs to create a wallet
+            clearInterval(intervalId);
+            
+            // Update status to reflect "no wallet" state
+            if (isActive) {
+              setStatus('failed');
+              setError('No wallet found for this user.');
+              setMessage('You need to create a wallet first.');
+            }
+          }
           return;
         }
       } catch (err) {
@@ -184,8 +204,8 @@ export default function WalletCreationHandler({
     // Initial check
     checkWalletStatus();
     
-    // Set up polling every second
-    intervalId = setInterval(checkWalletStatus, 1000);
+    // Set up polling every 3 seconds instead of every second
+    intervalId = setInterval(checkWalletStatus, 3000);
     
     // Cleanup on unmount
     return () => {
@@ -254,10 +274,9 @@ export default function WalletCreationHandler({
             </div>
           </div>
         ) : createNewWallet ? (
-          <div className="mb-4 bg-yellow-900/30 border border-yellow-600 text-yellow-200 px-4 py-3 rounded-lg">
-            <p className="font-bold">No recovery key found!</p>
+          <div className="mb-4 bg-gray-900/30 border border-gray-600 text-gray-200 px-4 py-3 rounded-lg">
             <p className="mt-1 text-sm">
-              If this is a new wallet, you should have received a recovery key. Check the logs or try creating the wallet again.
+              The recovery key is the same as your first wallet.
             </p>
           </div>
         ) : null}

@@ -1191,67 +1191,11 @@
     "authType": "biometric",
     "wallets": [
       {
-        "address": "0x3ACF0c3f6156AD4b38D8ff62902025015eF2ae5d",
-        "name": "New Wallet",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743934003160
-      },
-      {
-        "address": "0x1f6f59b7413Ed2B43dACf73d18622102b9Fa769E",
-        "name": "Primary Wallet",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743935965705,
-        "saltNonce": "742221"
-      },
-      {
-        "address": "0x090b63487f2A753371d2650aFe3F14Cb8194f620",
-        "name": "Primary Wallet",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743936225711,
-        "saltNonce": "113340"
-      },
-      {
-        "address": "0x57263023ffAbFD48F0491F758CeD5f295Aaa98C8",
+        "address": "0xB6E897704689aA039B1eE791FBCcD0D7A66A20B1",
         "name": "Primary Wallet",
         "chainId": 11155111,
         "isDefault": true,
-        "createdAt": 1743936512524,
-        "saltNonce": "872"
-      },
-      {
-        "address": "0x8b20456C36E492c944ADC12A32ED1A4b2B973B3B",
-        "name": "New Wallet (11:52:36 AM)",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743936756771,
-        "saltNonce": "874964"
-      },
-      {
-        "address": "0x7C6D39fA7559f92F8c45d7588b16b42b56760352",
-        "name": "New Wallet (11:59:45 AM)",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743937185238,
-        "saltNonce": "135690"
-      },
-      {
-        "address": "0x96E337cd650A9C5EE95c93043683f66dC1C3C61E",
-        "name": "New Wallet (12:02:18 PM)",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743937338312,
-        "saltNonce": "625645"
-      },
-      {
-        "address": "0xAE2cF0DB9476aeD4F0AE51C8fFe4175831ad611c",
-        "name": "New Wallet (12:05:15 PM)",
-        "chainId": 11155111,
-        "isDefault": false,
-        "createdAt": 1743937515684,
-        "saltNonce": "189895"
+        "createdAt": 1743940387774
       }
     ],
     "authenticators": [],
@@ -1266,7 +1210,7 @@
       "salt": "c2VydmVyLWtleS1zYWx0LWNoYW5nZS1pbi1wcm9kdWN0aW9u"
     },
     "recoveryKeyHash": "990b43ced5edf0be24056588b6f70973c4d4e2297c19876aecfe77209468e69d",
-    "walletAddress": "0xAE2cF0DB9476aeD4F0AE51C8fFe4175831ad611c"
+    "walletAddress": "0xB6E897704689aA039B1eE791FBCcD0D7A66A20B1"
   },
   {
     "id": "user_1743867991560_zzu3x14",
@@ -1295,5 +1239,49 @@
     "wallets": [],
     "biometricKey": "U2FsdGVkX19QT0d8Dfhkvs/gJEANmINco+ed6qBVeIMiAzY5Aa/a998hv1wNHc76Yh1Jl8MG4GxX7BQH5VUb5qkN1XNDRYJ1EV0pHNdxGRCjYsJM5dDXYtKo8uOHbGPl",
     "serverKey": "U2FsdGVkX18iqYVFH2OP14IfBsJH5K58cwt02fjSLqsQCGZUqpgKCGr8py9DqaQhGpUN25Erjc1D30SmYy1bAP3CnlM22UuNk2Z9SUqmctzmBuIh9AqLlvkN9MWBLxVR"
+  },
+  {
+    "id": "user_1743957641900_nar74t8",
+    "username": "user_1743957640221",
+    "authType": "biometric",
+    "wallets": [],
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": 1743957641900
+  },
+  {
+    "id": "user_1743958105035_coblpe6",
+    "username": "user_1743958103358",
+    "authType": "biometric",
+    "wallets": [],
+    "authenticators": [],
+    "credentials": [],
+    "createdAt": 1743958105035
+  },
+  {
+    "id": "user_1743960352429_05782568",
+    "username": "test_user_",
+    "authType": "biometric",
+    "createdAt": 1743960359823,
+    "wallets": [
+      {
+        "address": "0x38bB600085EC57b6e8D8a4BaFc60DFABc1482427",
+        "name": "Primary Wallet",
+        "chainId": 11155111,
+        "isDefault": true,
+        "createdAt": 1743960360119
+      },
+      {
+        "address": "0xA6592dd3F75C462cA18844953249354C8Bf409e6",
+        "name": "New Wallet (6:51:37 PM)",
+        "chainId": 11155111,
+        "isDefault": false,
+        "createdAt": 1743961897441,
+        "saltNonce": "206603"
+      }
+    ],
+    "biometricKey": "U2FsdGVkX18p4rmAcd6xWrDNd01WZAUP8uwJBw6w47OKBqykY5cigiLD+3x6PwAW9RQulVxCT+0EEsL7CZpyg/wIBfuuRBWS5Is5pXy/1k5hoBEa+D54poCvv1MFfS1Z",
+    "serverKey": "U2FsdGVkX187spVwfpxznRlrXz9/QIiKVSnMWsuTSWiIGdngJuln9zFE/jcl62l1IECPT/uHSZUlzTYmOgmUHSevPqkFjx49Vgmw05TV+ka7HEYH4FIXf/Z4v+/cVNuT",
+    "walletAddress": "0xA6592dd3F75C462cA18844953249354C8Bf409e6"
   }
 ]

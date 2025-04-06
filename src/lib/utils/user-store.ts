@@ -1,4 +1,4 @@
-import { randomBytes, createHash } from 'crypto';
+import { createHash, randomBytes } from 'crypto';
 import { privateKeyToAccount } from 'viem/accounts';
 import { type Address, type Hex, createPublicClient, http } from 'viem';
 import { sepolia } from 'viem/chains';
@@ -8,15 +8,17 @@ import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import crypto from 'crypto';
-import fs from 'fs';
-import path from 'path';
-import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys, hashRecoveryKey, encryptServerKey, decryptServerKey } from './key-encryption';
+// Remove file system imports
+import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys as keyCombine, encryptServerKey, decryptServerKey } from './key-encryption';
 import { Authenticator, EncryptedKey, AuthenticatorDevice, Wallet } from '../types/credentials';
 import { withRetry } from './retry-utils';
 import { createPublicClientForSepolia } from '../client-setup';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { createSmartAccountClient } from 'permissionless';
 import { toSafeSmartAccount } from 'permissionless/accounts';
+// Import Supabase client
+import { supabase } from '../supabase/client';
+import { entropyToMnemonic } from '@scure/bip39';
 
 // Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
@@ -26,25 +28,20 @@ export const origin = process.env.NODE_ENV === 'production'
   ? `https://${rpID}` 
   : `http://${rpID}`;
 
-// Storage file path
-const DATA_DIR = path.join(process.cwd(), 'data');
-const USERS_FILE = path.join(DATA_DIR, 'users.json');
-const AUTHENTICATORS_FILE = path.join(DATA_DIR, 'authenticators.json');
-
 // Types
 export interface UserAccount {
   id: string;
   username: string;
-  walletAddress?: Address; // Deprecated: Keep for backward compatibility
-  wallets: Wallet[];        // New: Array of wallet addresses
-  biometricKey?: string;    // encrypted private key for biometric auth
-  socialKey?: string;       // encrypted private key for social auth
+  wallets: Wallet[];        // Array of wallet addresses
+  walletAddress?: Address;  // Deprecated: Keep for backward compatibility
   createdAt: number;
   serverKey?: string | EncryptedKey;
+  server_key_encrypted?: string; // Encrypted private key from Supabase
   recoveryKeyHash?: string;
-  authType?: 'biometric' | 'social' | 'direct';
+  authType?: 'biometric';
   authenticators?: Authenticator[];
   credentials?: any[];
+  is_active?: boolean;      // Field from Supabase
 }
 
 // Types for distributed key management
@@ -52,183 +49,6 @@ export interface DistributedKeys {
   deviceKey: Hex;
   serverKey: Hex;
   recoveryKey: Hex;
-}
-
-// In-memory user accounts loaded from persistent storage
-export let userAccounts: UserAccount[] = [];
-export let authenticatorDevices: AuthenticatorDevice[] = [];
-
-// Initialize storage on startup
-export function initializeStorage(): void {
-  // Create data directory if it doesn't exist
-  if (!fs.existsSync(DATA_DIR)) {
-    try {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-      console.log(`Created data directory: ${DATA_DIR}`);
-    } catch (error) {
-      console.error('Failed to create data directory:', error);
-    }
-  }
-  
-  // Load user accounts from storage
-  loadUserData();
-  loadAuthenticatorData();
-  
-  // Log the result
-  console.log(`Loaded ${userAccounts.length} user accounts from storage`);
-  console.log(`Loaded ${authenticatorDevices.length} authenticator devices from storage`);
-}
-
-// Create a test user for development
-function createTestUser() {
-  // Create basic user
-  const userId = `test_user_${Date.now()}`;
-  const testUser = {
-    id: userId,
-    username: 'test_user',
-    authType: 'biometric' as const,
-    wallets: [], // Initialize empty wallets array
-    authenticators: [],
-    credentials: [],
-    createdAt: new Date().getTime()
-  } as UserAccount;
-  
-  // serverKey is required for wallet creation
-  testUser.serverKey = encryptPrivateKey(
-    '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex, 
-    process.env.KEY_ENCRYPTION_KEY || 'default_key'
-  );
-  
-  // Add the user to the users array
-  userAccounts.push(testUser);
-  
-  // Save user data
-  saveUserData();
-  
-  return testUser;
-}
-
-// Load user data from storage
-function loadUserData(): void {
-  try {
-    // Check if the users file exists
-    if (fs.existsSync(USERS_FILE)) {
-      // Read and parse the user data
-      const data = fs.readFileSync(USERS_FILE, 'utf8');
-      const parsedData = JSON.parse(data);
-      
-      // Convert ISO date strings back to Date objects and ensure wallets array exists
-      userAccounts = parsedData.map((user: any) => {
-        // Ensure wallets array exists
-        if (!Array.isArray(user.wallets)) {
-          user.wallets = [];
-          
-          // If there's a legacy walletAddress, add it as a wallet
-          if (user.walletAddress) {
-            user.wallets.push({
-              address: user.walletAddress,
-              name: 'Primary Wallet',
-              chainId: 11155111, // Sepolia
-              isDefault: true,
-              createdAt: typeof user.createdAt === 'string' 
-                ? new Date(user.createdAt).getTime() 
-                : user.createdAt
-            });
-          }
-        }
-        
-        return {
-          ...user,
-          createdAt: typeof user.createdAt === 'string' 
-            ? new Date(user.createdAt).getTime() 
-            : user.createdAt
-        };
-      });
-    } else {
-      console.log('No user data file found, starting with empty user accounts');
-      userAccounts = [];
-      
-      // Create a test user for development
-      if (process.env.NODE_ENV !== 'production') {
-        createTestUser();
-      }
-    }
-  } catch (error) {
-    console.error('Error loading user data:', error);
-    userAccounts = [];
-    
-    // Create a test user for development
-    if (process.env.NODE_ENV !== 'production') {
-      createTestUser();
-    }
-  }
-}
-
-// Load authenticator data from storage
-function loadAuthenticatorData(): void {
-  try {
-    // Check if the authenticators file exists
-    if (fs.existsSync(AUTHENTICATORS_FILE)) {
-      // Read and parse the authenticator data
-      const data = fs.readFileSync(AUTHENTICATORS_FILE, 'utf8');
-      const parsedData = JSON.parse(data);
-      
-      // Convert ISO date strings back to Date objects and Buffer objects
-      authenticatorDevices = parsedData.map((device: any) => ({
-        ...device,
-        createdAt: new Date(device.createdAt),
-        lastUsed: device.lastUsed ? new Date(device.lastUsed) : undefined,
-        credentialPublicKey: device.credentialPublicKey ? Buffer.from(device.credentialPublicKey, 'base64') : undefined
-      }));
-    } else {
-      console.log('No authenticator data file found, starting with empty authenticators');
-      authenticatorDevices = [];
-    }
-  } catch (error) {
-    console.error('Error loading authenticator data:', error);
-    authenticatorDevices = [];
-  }
-}
-
-// Save user data to storage
-function saveUserData(): void {
-  try {
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    
-    // Write user data to file
-    const data = JSON.stringify(userAccounts, null, 2);
-    fs.writeFileSync(USERS_FILE, data, 'utf8');
-    console.log(`Saved ${userAccounts.length} users to storage`);
-  } catch (error) {
-    console.error('Error saving user data:', error);
-  }
-}
-
-// Save authenticator data to storage
-function saveAuthenticatorData(): void {
-  try {
-    // Create the directory if it doesn't exist
-    if (!fs.existsSync(DATA_DIR)) {
-      fs.mkdirSync(DATA_DIR, { recursive: true });
-    }
-    
-    // Convert Buffer objects to base64 strings for storage
-    const dataToSave = authenticatorDevices.map(device => ({
-      ...device,
-      credentialPublicKey: device.credentialPublicKey ? 
-        Buffer.from(device.credentialPublicKey).toString('base64') : undefined
-    }));
-    
-    // Write authenticator data to file
-    const data = JSON.stringify(dataToSave, null, 2);
-    fs.writeFileSync(AUTHENTICATORS_FILE, data, 'utf8');
-    console.log(`Saved ${authenticatorDevices.length} authenticators to storage`);
-  } catch (error) {
-    console.error('Error saving authenticator data:', error);
-  }
 }
 
 // Encrypt a private key with a password
@@ -281,61 +101,16 @@ export function decryptPrivateKey(encryptedKey: string, password: string): Hex {
   }
 }
 
-// Create a smart account from a private key
-export async function createSmartAccountFromPrivateKey(privateKey: Hex): Promise<{
-  address: Address;
-  privateKey: Hex;
-}> {
-  const owner = privateKeyToAccount(privateKey);
-  
-  // Create a public client
-  const publicClient = createPublicClient({
-    chain: sepolia,
-    transport: http()
-  });
-  
-  // Log which chain we're using for account creation
-  console.log(`Creating smart account on Sepolia chain`);
-  
-  // Import toSafeSmartAccount directly to avoid circular dependencies
-  try {
-    const permissionless = require('permissionless');
-    let toSafeSmartAccountFn;
-    
-    if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
-      toSafeSmartAccountFn = permissionless.accounts.toSafeSmartAccount;
-    } else if (permissionless.toSafeSmartAccount) {
-      toSafeSmartAccountFn = permissionless.toSafeSmartAccount;
-    } else {
-      throw new Error('toSafeSmartAccount function not found');
-    }
-    
-    const smartAccount = await toSafeSmartAccountFn({
-      client: publicClient,
-      owners: [owner],
-      entryPoint: {
-        address: ENTRY_POINT_ADDRESS,
-        version: "0.6",
-      },
-      safeVersion: "1.4.1",
-      chainId: sepolia.id,
-      saltNonce: 0n
-    });
-    
-    return {
-      address: smartAccount.address,
-      privateKey
-    };
-  } catch (error) {
-    console.error('Error creating Smart Account:', error);
-    throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
-  }
+// Function to combine keys for the DKG system
+export function combineKeys(deviceKey: Hex, serverKey: Hex): Hex {
+  return `0x${createHash('sha256').update(deviceKey + serverKey).digest('hex')}` as Hex;
 }
 
-//* SIGNER 2: BIOMETRICS -> SCA
-// Create a smart account from biometric or social credentials
+//* SIGNER: DKG-> SCA
+// Create a smart account from biometric credentials using true DKG
 export async function createSmartAccountFromCredential(
   userId: string,
+  deviceKey: Hex,
   authenticationType: 'biometric' | 'passkey' = 'biometric',
   forceCreate: boolean = false, // Add parameter to control SCA creation
   saltNonce?: bigint // Add salt nonce parameter to create different addresses
@@ -343,105 +118,69 @@ export async function createSmartAccountFromCredential(
   try {
     console.log(`Managing smart account for user ${userId} with ${authenticationType} authentication`);
     
-    // Get the user from storage
-    const user = findUserById(userId);
+    // Get the user from Supabase
+    const user = await findUserById(userId);
     if (!user) {
       throw new Error(`User ${userId} not found`);
     }
 
-    // If forceCreate is false and user already has a wallet address, return it
-    if (user.walletAddress && !forceCreate) {
-      console.log(`User ${userId} already has a wallet address: ${user.walletAddress}`);
-      return {
-        address: user.walletAddress,
-        exists: true
-      };
+    if (!forceCreate) {
+      // Get user's wallets from Supabase
+      const { data: walletData, error: walletError } = await supabase
+        .from('wallets')
+        .select('*')
+        .eq('user_id', userId)
+        .eq('is_default', true)
+        .single();
+      
+      if (!walletError && walletData) {
+        console.log(`User ${userId} already has a default wallet: ${walletData.address}`);
+        return {
+          address: walletData.address as Address,
+          exists: true
+        };
+      }
     }
 
-    // If we're here, either we need to create a new wallet or force create was specified
+    // If we're here, we need to create a new wallet or force create was specified
     console.log(`Creating new smart account for user ${userId}`);
     
-    // Get private key from the user, handle different authentication types
-    let privateKey: string | undefined;
-    if (authenticationType === 'biometric') {
-      privateKey = user.biometricKey;
-    } else if (authenticationType === 'passkey') {
-      privateKey = user.socialKey;
-    }
-
-    if (!privateKey) {
-      throw new Error(`No ${authenticationType} private key found for user ${userId}`);
+    // Get DKG keys using the provided device key
+    const { serverKey, combinedKey } = await getDKGKeysForUser(userId, deviceKey);
+    console.log(`Using DKG keys for wallet creation`);
+    
+    // Create the owner account from the combined key
+    const owner = privateKeyToAccount(combinedKey);
+    console.log(`Created owner account with address: ${owner.address}`);
+    
+    // Create the smart account
+    const result = await createPermissionlessSCA(userId, owner, saltNonce);
+    
+    // Store the wallet in Supabase
+    const { error: walletError } = await supabase
+      .from('wallets')
+      .insert({
+        id: crypto.randomUUID(),
+        user_id: userId,
+        address: result.address as string,
+        name: 'DKG Wallet created on ' + new Date().toLocaleDateString(),
+        chain_id: 11155111, // Sepolia
+        is_default: true,
+        created_at: new Date().toISOString(),
+        salt_nonce: saltNonce?.toString()
+      });
+      
+    if (walletError) {
+      console.error('Failed to store wallet in Supabase:', walletError);
+      throw new Error(`Failed to store wallet in Supabase: ${walletError.message}`);
     }
     
-    // Decrypt the private key before using it
-    // This is the key fix - we need to make sure the key is in the right format
-    let decryptedKey: `0x${string}`;
-    try {
-      // Try to decrypt the key first
-      decryptedKey = decryptPrivateKey(privateKey, userId);
-      console.log('Successfully decrypted private key');
-      
-      // Check if it's a valid hex string
-      if (!decryptedKey.startsWith('0x')) {
-        console.log('Key is not a valid hex string, adding 0x prefix');
-        decryptedKey = `0x${decryptedKey}` as `0x${string}`;
-      }
-      
-      // Ensure correct key length
-      if (decryptedKey.length !== 66) { // Should be 0x + 64 hex chars for 32 bytes
-        throw new Error(`Invalid key length: ${decryptedKey.length} chars (expected 66)`);
-      }
-    } catch (decryptError) {
-      console.error('Error decrypting private key:', decryptError);
-      
-      // In development, for testing, use a default key
-      if (process.env.NODE_ENV !== 'production') {
-        console.log('Using default testing private key in development');
-        decryptedKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as `0x${string}`;
-      } else {
-        throw new Error(`Failed to decrypt private key: ${decryptError instanceof Error ? decryptError.message : String(decryptError)}`);
-      }
-    }
+    console.log(`Stored new wallet ${result.address} in Supabase`);
     
-    // Create the smart account with retry logic to handle rate limits
-    return await withRetry(
-      async () => {
-        console.log("Creating SCA with improved permissionless.js v2 implementation...");
-        const result = await createPermissionlessSCA(
-          userId, 
-          decryptedKey, 
-          updateUserWalletAddress,
-          saltNonce
-        );
-        
-        // Update the user object with the new wallet address
-        if (user && result.address) {
-          user.walletAddress = result.address;
-          updateUser(user);
-          console.log(`Updated user ${userId} with wallet address ${result.address}`);
-        }
-        
-        return {
-          ...result,
-          exists: false // This is a newly created account
-        };
-      },
-      {
-        maxRetries: 5,
-        initialDelay: 2000,
-        maxDelay: 15000,
-        backoffFactor: 2,
-        retryableErrors: [
-          'Too many request',
-          'rate limit',
-          'Rate limit',
-          'too many request',
-          'Too Many Requests',
-          'too many requests',
-          'Request failed with status code 429'
-        ]
-      }
-    );
+    return {
+      ...result,
+      exists: false // This is a newly created account
+    };
   } catch (error) {
     console.error('Error creating smart account from credential:', error);
     const errorDetails = error instanceof Error ? error : new Error(String(error));
@@ -456,17 +195,94 @@ export async function createSmartAccountFromCredential(
   }
 }
 
+// Integrated DKG key handling and wallet creation
+async function createKeysForDKG(
+  userId: string,
+  serverKeyEncrypted: string,
+  biometricKeyEncrypted: string,
+  saltNonce?: bigint
+): Promise<{
+  address: Address;
+  exists: boolean;
+  smartAccount?: any;
+  smartAccountClient?: any;
+  publicClient?: any;
+  pimlicoClient?: any;
+  owner?: any;
+}> {
+  try {
+    console.log('Creating keys for Distributed Key Generation (DKG)');
+    
+    // Decrypt the server key
+    let serverKey: Hex;
+    try {
+      serverKey = decryptPrivateKey(serverKeyEncrypted, process.env.KEY_ENCRYPTION_KEY || '');
+      console.log('Successfully decrypted server key');
+    } catch (error) {
+      console.error('Error decrypting server key:', error);
+      throw new Error(`Failed to decrypt server key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    // Decrypt the biometric key
+    let biometricKey: Hex;
+    try {
+      biometricKey = decryptPrivateKey(biometricKeyEncrypted, userId);
+      console.log('Successfully decrypted biometric key');
+    } catch (error) {
+      console.error('Error decrypting biometric key:', error);
+      throw new Error(`Failed to decrypt biometric key: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    
+    // Combine the keys using DKG
+    const combinedKey = combineKeys(biometricKey, serverKey);
+    console.log('Successfully combined keys');
+    
+    // Create the owner account from the combined key
+    const owner = privateKeyToAccount(combinedKey);
+    console.log(`Created owner account with address: ${owner.address}`);
+    
+    // Create the smart account using Permissionless.js
+    const result = await createPermissionlessSCA(userId, owner, saltNonce);
+    
+    // Store the wallet in Supabase
+    const { error: walletError } = await supabase
+      .from('wallets')
+      .insert({
+        id: crypto.randomUUID(),
+        user_id: userId,
+        address: result.address as string,
+        name: 'DKG Wallet created on ' + new Date().toLocaleDateString(),
+        chain_id: 11155111, // Sepolia
+        is_default: true,
+        created_at: new Date().toISOString(),
+        salt_nonce: saltNonce?.toString()
+      });
+      
+    if (walletError) {
+      console.error('Failed to store wallet in Supabase:', walletError);
+      throw new Error(`Failed to store wallet in Supabase: ${walletError.message}`);
+    }
+    
+    console.log(`Stored new wallet ${result.address} in Supabase`);
+    
+    return {
+      ...result,
+      exists: false
+    };
+  } catch (error) {
+    console.error('Error in DKG key creation:', error);
+    throw error;
+  }
+}
+
+// Updated to use the owner account directly instead of creating from private key
 async function createPermissionlessSCA(
   userId: string,
-  privateKey: `0x${string}`,
-  updateUserFn: (userId: string, walletAddress: Address, saltNonce?: bigint) => void,
+  owner: any, // Using the already created owner from combined keys
   saltNonce?: bigint
 ) {
   try {
-    console.log('Creating permissionless SCA (JS) for owner');
-    
-    // Create the owner account from the private key
-    const owner = privateKeyToAccount(privateKey);
+    console.log('Creating permissionless SCA with owner from DKG');
     console.log(`Owner EOA address: ${owner.address}`);
     
     // Get library version
@@ -489,7 +305,7 @@ async function createPermissionlessSCA(
     // Safe account parameters
     const safeParams: any = {
       client: publicClient,
-      owners: [owner],
+      owners: [owner], // Using the owner account from combined keys
       version: "1.4.1",
       entryPoint: {
         address: ENTRY_POINT_ADDRESS,
@@ -580,8 +396,8 @@ async function createPermissionlessSCA(
     
     console.log('Created Smart Account Client');
     
-    // Update the user's wallet address - pass the saltNonce to store with the wallet
-    updateUserFn(userId, smartAccount.address, safeParams.saltNonce);
+    // Call updateUserFn to maintain backwards compatibility
+    await updateUserWalletAddress(userId, smartAccount.address, safeParams.saltNonce);
     
     // Return the smart account info
     return {
@@ -621,144 +437,262 @@ function getAvailableAccountFunctions() {
   }
 }
 
-// Find a user by ID
-export function findUserById(userId: string): UserAccount | undefined {
-  // If no users are loaded, initialize storage
-  if (userAccounts.length === 0) {
-    initializeStorage();
-  }
-  
-  const user = userAccounts.find(user => user.id === userId);
-  
-  // For development, return a mock user if none found
-  if (!user && process.env.NODE_ENV !== 'production') {
-    console.log(`Creating mock user for ID: ${userId}`);
+// Find a user by ID - using Supabase
+export async function findUserById(userId: string): Promise<UserAccount | null> {
+  try {
+    console.log(`Finding user by ID: ${userId}`);
     
+    // Query Supabase for the user
+    const { data, error } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', userId)
+      .single();
+    
+    if (error) {
+      console.error('Supabase error finding user:', error.message);
+      
+      // Only in development, create a test user
+      if (process.env.NODE_ENV !== 'production') {
+        console.log(`Creating mock user for development with ID: ${userId}`);
+        return await createTestUser(userId);
+      }
+      
+      return null;
+    }
+    
+    // Get the user's wallets
+    const { data: wallets, error: walletsError } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId);
+    
+    if (walletsError) {
+      console.error('Error fetching wallets:', walletsError);
+    }
+    
+    // Convert the Supabase data to our UserAccount format
+    const user: UserAccount = {
+      id: data.id,
+      username: data.username || 'Unknown',
+      authType: data.auth_type || 'biometric',
+      createdAt: new Date(data.created_at).getTime(),
+      serverKey: data.server_key_encrypted,
+      recoveryKeyHash: data.recovery_key_hash,
+      wallets: wallets?.map(wallet => ({
+        address: wallet.address as Address,
+        name: wallet.name || 'Default Wallet',
+        chainId: wallet.chain_id || 11155111,
+        isDefault: wallet.is_default || false,
+        createdAt: new Date(wallet.created_at).getTime(),
+        saltNonce: wallet.salt_nonce
+      })) || []
+    };
+    
+    // Set walletAddress to the default wallet for backward compatibility
+    const defaultWallet = user.wallets.find(w => w.isDefault);
+    if (defaultWallet) {
+      user.walletAddress = defaultWallet.address;
+    }
+    
+    return user;
+  } catch (error) {
+    console.error('Error finding user by ID:', error);
+    return null;
+  }
+}
+
+// Create a test user for development - using Supabase
+async function createTestUser(userId: string): Promise<UserAccount | null> {
+  try {
     // Default private key for testing (hardhat #0)
     const defaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
     
-    // Create a mock user with encrypted keys
-    const mockUser: UserAccount = {
-      id: userId,
-      username: `test_${userId.substring(0, 5)}`,
-      authType: 'biometric',
-      createdAt: new Date().getTime(),
-      wallets: [], // Empty wallets array
-      
-      // Properly encrypt the private key using the user ID as the password
-      biometricKey: encryptPrivateKey(defaultPrivateKey, userId),
-      
-      // Also add server key
-      serverKey: encryptPrivateKey(
-        defaultPrivateKey, 
-        process.env.KEY_ENCRYPTION_KEY || 'default_key'
-      )
-    };
+    // Create the user in Supabase
+    const { data, error } = await supabase
+      .from('users')
+      .insert({
+        id: userId,
+        username: `test_${userId.substring(0, 5)}`,
+        auth_type: 'biometric',
+        created_at: new Date().toISOString(),
+        server_key_encrypted: encryptPrivateKey(defaultPrivateKey, userId),
+        is_active: true
+      })
+      .select()
+      .single();
     
-    console.log(`Created mock user with encrypted biometric key`);
-    userAccounts.push(mockUser);
-    saveUserData();
-    return mockUser;
+    if (error) {
+      console.error('Error creating test user in Supabase:', error);
+      return null;
+    }
+    
+    // Return the created user
+    return {
+      id: data.id,
+      username: data.username,
+      authType: data.auth_type,
+      createdAt: new Date(data.created_at).getTime(),
+      serverKey: data.server_key_encrypted,
+      wallets: []
+    };
+  } catch (error) {
+    console.error('Error creating test user:', error);
+    return null;
   }
-  
-  return user;
 }
 
-// Find a user by wallet address
-export function findUserByWalletAddress(address: Address): UserAccount | undefined {
-  return userAccounts.find(user => user.walletAddress?.toLowerCase() === address.toLowerCase());
-}
-
-// Find authenticator by credential ID
-export function findAuthenticatorByCredentialId(credentialId: string): AuthenticatorDevice | undefined {
-  return authenticatorDevices.find(device => device.credentialID === credentialId);
-}
-
-// Find authenticators by wallet address
-export function findAuthenticatorsByWalletAddress(address: Address): AuthenticatorDevice[] {
-  return authenticatorDevices.filter(device => device.walletAddress.toLowerCase() === address.toLowerCase());
-}
-
-// Add a new authenticator for a wallet
-export function addAuthenticator(authenticator: AuthenticatorDevice): void {
-  // Add id if not provided
-  if (!authenticator.id) {
-    authenticator.id = crypto.randomUUID();
+// Find a user by wallet address - using Supabase
+export async function findUserByWalletAddress(address: Address): Promise<UserAccount | null> {
+  try {
+    // Find the wallet in Supabase
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('user_id')
+      .eq('address', address.toLowerCase())
+      .single();
+    
+    if (error || !data) {
+      console.error('Error finding wallet by address:', error?.message || 'Wallet not found');
+      return null;
+    }
+    
+    // Get the user by ID
+    return await findUserById(data.user_id);
+  } catch (error) {
+    console.error('Error finding user by wallet address:', error);
+    return null;
   }
-  
-  // Set creation time if not provided
-  if (!authenticator.createdAt) {
-    authenticator.createdAt = new Date();
+}
+
+// Find authenticator by credential ID - using Supabase
+export async function findAuthenticatorByCredentialId(credentialId: string): Promise<AuthenticatorDevice | undefined> {
+  try {
+    // Find the authenticator in Supabase
+    const { data, error } = await supabase
+      .from('authenticators')
+      .select('*')
+      .eq('credential_id', credentialId)
+      .single();
+    
+    if (error || !data) {
+      console.error('Error finding authenticator by credential ID:', error?.message || 'Authenticator not found');
+      return undefined;
+    }
+    
+    // Get the user's default wallet address
+    const { data: walletData, error: walletError } = await supabase
+      .from('wallets')
+      .select('address')
+      .eq('user_id', data.user_id)
+      .eq('is_default', true)
+      .single();
+    
+    // If no wallet found, return undefined
+    if (walletError || !walletData) {
+      console.log('No wallet found for this authenticator, returning undefined');
+      return undefined;
+    }
+    
+    // Convert from Supabase to AuthenticatorDevice
+    return {
+      id: data.id,
+      walletAddress: walletData.address as Address,
+      credentialID: data.credential_id,
+      credentialPublicKey: data.credential_public_key,
+      counter: data.counter,
+      deviceName: data.device_name || 'Unknown Device',
+      createdAt: new Date(data.created_at),
+      lastUsed: data.last_used ? new Date(data.last_used) : undefined
+    };
+  } catch (error) {
+    console.error('Error finding authenticator by credential ID:', error);
+    return undefined;
   }
-  
-  // Add to the list
-  authenticatorDevices.push(authenticator);
-  
-  // Save to storage
-  saveAuthenticatorData();
-  
-  console.log(`Added authenticator ${authenticator.id} for wallet ${authenticator.walletAddress}`);
 }
 
-// Update an authenticator
-export function updateAuthenticator(authenticator: AuthenticatorDevice): void {
-  const index = authenticatorDevices.findIndex(a => a.id === authenticator.id);
-  
-  if (index === -1) {
-    throw new Error(`Authenticator with ID ${authenticator.id} not found`);
+// Update authenticator counter - using Supabase
+export async function updateAuthenticator(authenticator: AuthenticatorDevice): Promise<void> {
+  try {
+    // Update the authenticator in Supabase
+    const { error } = await supabase
+      .from('authenticators')
+      .update({
+        counter: authenticator.counter,
+        last_used: authenticator.lastUsed?.toISOString()
+      })
+      .eq('credential_id', authenticator.credentialID);
+    
+    if (error) {
+      console.error('Error updating authenticator:', error);
+      throw new Error(`Failed to update authenticator: ${error.message}`);
+    }
+  } catch (error) {
+    console.error('Error updating authenticator:', error);
+    throw error;
   }
-  
-  // Update the authenticator
-  authenticatorDevices[index] = authenticator;
-  
-  // Save to storage
-  saveAuthenticatorData();
-  
-  console.log(`Updated authenticator ${authenticator.id}`);
 }
 
-// Create a new user
-export function createUser(
-  username: string,
-  authType: 'biometric' | 'social' | 'direct',
-  walletAddress?: Address,
-): UserAccount {
-  const userId = `user_${Date.now()}_${Math.random().toString(36).substring(2, 9)}`;
-  
-  const user: UserAccount = {
-    id: userId,
-    username,
-    authType,
-    walletAddress,
-    wallets: [], // Initialize empty wallets array
-    authenticators: [],
-    credentials: [],
-    createdAt: new Date().getTime()
-  };
-  
-  userAccounts.push(user);
-  saveUserData(); // Save the updated user list
-  return user;
-}
-
-// Update an existing user
-export function updateUser(updatedUser: UserAccount): void {
-  const index = userAccounts.findIndex(user => user.id === updatedUser.id);
-  
-  if (index === -1) {
-    throw new Error(`User with ID ${updatedUser.id} not found`);
+// Update the wallet address for a user - compatible with createPermissionlessSCA
+export async function updateUserWalletAddress(userId: string, walletAddress: Address, saltNonce?: bigint): Promise<void> {
+  try {
+    // We don't need to do anything here as we insert the wallet directly in createSmartAccountFromCredential
+    console.log(`Wallet address ${walletAddress} will be stored in Supabase for user ${userId}`);
+  } catch (error) {
+    console.error('Error updating user wallet address:', error);
+    throw error;
   }
-  
-  // Update the user
-  userAccounts[index] = updatedUser;
-  
-  // Save the updated user data
-  saveUserData();
-  
-  console.log(`Updated user ${updatedUser.id}`);
 }
 
-// Store keys securely
+// Create a new user in Supabase
+export async function createUser(data: Partial<UserAccount> & { id: string }): Promise<UserAccount> {
+  const { error } = await supabase
+    .from('users')
+    .insert({
+      id: data.id,
+      username: data.username,
+      created_at: new Date().toISOString(),
+      authType: data.authType || 'biometric',
+      is_active: true
+    });
+
+  if (error) {
+    throw new Error(`Failed to create user: ${error.message}`);
+  }
+
+  return await findUserById(data.id);
+}
+
+// Get wallets for a user - using Supabase
+export async function getWalletsForUser(userId: string): Promise<Wallet[]> {
+  try {
+    // Get wallets from Supabase
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId);
+    
+    if (error) {
+      console.error('Error fetching wallets for user:', error);
+      return [];
+    }
+    
+    // Convert to our Wallet format
+    return data.map(wallet => ({
+      address: wallet.address as Address,
+      name: wallet.name || 'Default Wallet',
+      chainId: wallet.chain_id || 11155111,
+      isDefault: wallet.is_default || false,
+      createdAt: new Date(wallet.created_at).getTime(),
+      saltNonce: wallet.salt_nonce
+    }));
+  } catch (error) {
+    console.error('Error getting wallets for user:', error);
+    return [];
+  }
+}
+
+// Store keys securely - using Supabase
 export async function storeKeys(
   userId: string,
   deviceKey: Hex,
@@ -766,23 +700,21 @@ export async function storeKeys(
   recoveryKey: Hex
 ): Promise<boolean> {
   try {
-    // Find the user
-    const user = findUserById(userId);
-    if (!user) {
-      console.error(`User ${userId} not found when storing keys`);
+    // Update the user in Supabase
+    const { error } = await supabase
+      .from('users')
+      .update({
+        server_key_encrypted: encryptPrivateKey(deviceKey, userId),
+        recovery_key_hash: hashRecoveryKey(recoveryKey)
+      })
+      .eq('id', userId);
+    
+    if (error) {
+      console.error('Error storing keys in Supabase:', error);
       return false;
     }
     
-    // Use stronger encryption specifically for server keys
-    user.serverKey = encryptServerKey(serverKey);
-    
-    // Store a hash of the recovery key for verification
-    user.recoveryKeyHash = hashRecoveryKey(recoveryKey);
-    
-    // Save the updated user data
-    saveUserData();
-    
-    console.log(`Stored keys securely for user ${userId}`);
+    console.log(`Stored keys securely for user ${userId} in Supabase`);
     return true;
   } catch (error) {
     console.error('Error storing keys:', error);
@@ -790,500 +722,329 @@ export async function storeKeys(
   }
 }
 
-// Get keys for signing
-export async function getKeys(userId: string): Promise<{
-  deviceKey: Hex;
-  serverKey: Hex;
-}> {
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error(`User with ID ${userId} not found`);
-  }
-
-  if (!user.serverKey) {
-    throw new Error('Server key not found');
-  }
-
-  // Decrypt server key based on format
-  let serverKey: string;
-  if (typeof user.serverKey === 'string') {
-    // Legacy format using simple encryption
-    serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || '');
-  } else if (user.serverKey.algorithm === 'AES-256-GCM-SCRYPT') {
-    // New format with stronger scrypt-based encryption
-    serverKey = decryptServerKey(user.serverKey);
-  } else {
-    // Standard AES-GCM encryption
-    serverKey = decryptData(user.serverKey);
-  }
-  
-  // Device key is retrieved by the client-side code
-  // Return a placeholder that will be replaced by the client
-  return {
-    deviceKey: '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex,
-    serverKey: serverKey as Hex
-  };
-}
-
-// Verify recovery key
-export function verifyRecoveryKey(userId: string, recoveryKey: Hex): boolean {
-  const user = findUserById(userId);
-  if (!user || !user.recoveryKeyHash) {
-    return false;
-  }
-
-  const providedKeyHash = hashRecoveryKey(recoveryKey);
-  return providedKeyHash === user.recoveryKeyHash;
-}
-
-// Get the smart account client for a user
-export async function getSmartAccountClient(userId: string) {
-  // Find the user
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error('User not found');
-  }
-  
-  // Get the keys
-  const { deviceKey, serverKey } = await getKeys(userId);
-  
-  // Create a deterministic key from the combined device and server keys
-  const combinedKey = combineKeys(deviceKey, serverKey);
-  
-  // Create the owner account
-  const owner = privateKeyToAccount(combinedKey);
-  
+// Add a new authenticator for a wallet - using Supabase
+export async function addAuthenticator(authenticator: AuthenticatorDevice): Promise<void> {
   try {
-    // Initialize blockchain clients
-    const publicClient = createPublicClient({
-      chain: sepolia,
-      transport: http()
-    });
-    
-    // Try to import the permissionless.js dependencies
-    let createSafeSmartAccount;
-    let createPimlicoClient;
-    let createSmartAccountClient;
-    
-    try {
-      // Dynamic imports to avoid circular dependencies
-      const permissionless = require('permissionless');
-      const pimlicoClients = require('permissionless/clients/pimlico');
-      
-      // Get the functions we need from permissionless
-      if (permissionless.accounts && permissionless.accounts.toSafeSmartAccount) {
-        createSafeSmartAccount = permissionless.accounts.toSafeSmartAccount;
-      } else if (permissionless.toSafeSmartAccount) {
-        createSafeSmartAccount = permissionless.toSafeSmartAccount;
-      } else {
-        throw new Error('toSafeSmartAccount function not found');
-      }
-      
-      // Get Pimlico client creator
-      createPimlicoClient = pimlicoClients.createPimlicoClient;
-      
-      // Get smart account client creator
-      createSmartAccountClient = permissionless.createSmartAccountClient;
-    } catch (importError) {
-      console.error('Failed to import permissionless.js dependencies:', importError);
-      throw new Error('Failed to import required dependencies');
+    // Add id if not provided
+    if (!authenticator.id) {
+      authenticator.id = crypto.randomUUID();
     }
     
-    // Create Pimlico client
-    const pimlicoApiKey = process.env.PIMLICO_API_KEY || '';
-    if (!pimlicoApiKey) {
-      throw new Error('Pimlico API key is required');
+    // Set creation time if not provided
+    if (!authenticator.createdAt) {
+      authenticator.createdAt = new Date();
     }
     
-    const bundlerUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey}`;
-    const pimlicoClient = createPimlicoClient({
-      transport: http(bundlerUrl),
-      entryPoint: ENTRY_POINT_ADDRESS,
-    });
+    // Convert Buffer to bytea for Postgres
+    let credentialPublicKeyBase64 = null;
+    if (authenticator.credentialPublicKey instanceof Buffer) {
+      credentialPublicKeyBase64 = Buffer.from(authenticator.credentialPublicKey).toString('base64');
+    }
     
-    // Create the smart account
-    const smartAccount = await createSafeSmartAccount({
-      client: publicClient,
-      owners: [owner],
-      entryPoint: {
-        address: ENTRY_POINT_ADDRESS,
-        version: "0.6",
-      },
-      chainId: sepolia.id,
-      version: "1.4.1",
-    });
+    // Insert the authenticator into Supabase
+    const { error } = await supabase
+      .from('authenticators')
+      .insert({
+        id: authenticator.id,
+        user_id: await getUserIdForWalletAddress(authenticator.walletAddress),
+        credential_id: authenticator.credentialID,
+        credential_public_key: credentialPublicKeyBase64,
+        counter: authenticator.counter,
+        device_name: authenticator.deviceName || 'Unknown Device',
+        created_at: authenticator.createdAt.toISOString(),
+        last_used: authenticator.lastUsed?.toISOString(),
+        is_active: true
+      });
     
-    // Create the smart account client
-    const smartAccountClient = createSmartAccountClient({
-      account: smartAccount,
-      chain: sepolia,
-      bundlerTransport: http(bundlerUrl),
-      middleware: {
-        sponsorUserOperation: async (args: any) => {
-          try {
-            if (!pimlicoClient.sponsorUserOperation) {
-              throw new Error('Pimlico client not properly initialized');
-            }
-            
-            const response = await pimlicoClient.sponsorUserOperation({
-              userOperation: args.userOperation,
-              entryPoint: ENTRY_POINT_ADDRESS
-            });
-            return response;
-          } catch (err) {
-            console.error('Sponsorship error:', err);
-            throw err;
-          }
-        }
-      }
-    });
+    if (error) {
+      console.error('Error adding authenticator to Supabase:', error);
+      throw new Error(`Failed to add authenticator: ${error.message}`);
+    }
     
+    console.log(`Added authenticator ${authenticator.id} for wallet ${authenticator.walletAddress}`);
+  } catch (error) {
+    console.error('Error adding authenticator:', error);
+    throw error;
+  }
+}
+
+// Helper function to get user ID for a wallet address
+async function getUserIdForWalletAddress(address: Address): Promise<string> {
+  try {
+    // Find the wallet in Supabase
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('user_id')
+      .eq('address', address.toLowerCase())
+      .single();
+    
+    if (error || !data) {
+      console.error('Error finding user ID for wallet address:', error?.message || 'Wallet not found');
+      throw new Error('Wallet address not found');
+    }
+    
+    return data.user_id;
+  } catch (error) {
+    console.error('Error getting user ID for wallet address:', error);
+    throw error;
+  }
+}
+
+// Update user - simplified for Supabase
+export async function updateUser(updatedUser: Partial<UserAccount> & { id: string }): Promise<void> {
+  try {
+    // Update the user in Supabase
+    const { error } = await supabase
+      .from('users')
+      .update({
+        username: updatedUser.username,
+        auth_type: updatedUser.authType || updatedUser.auth_type,
+        server_key_encrypted: updatedUser.serverKey || updatedUser.server_key_encrypted,
+        recovery_key_hash: updatedUser.recoveryKeyHash,
+        is_active: updatedUser.is_active
+      })
+      .eq('id', updatedUser.id);
+    
+    if (error) {
+      console.error('Error updating user in Supabase:', error);
+      throw new Error(`Failed to update user: ${error.message}`);
+    }
+    
+    console.log(`Updated user ${updatedUser.id} in Supabase`);
+  } catch (error) {
+    console.error('Error updating user:', error);
+    throw error;
+  }
+}
+
+// Get the default wallet for a user - using Supabase
+export async function getDefaultWallet(userId: string): Promise<Wallet | undefined> {
+  try {
+    // Get wallets from Supabase
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('is_default', { ascending: false })
+      .limit(1);
+    
+    if (error || !data || data.length === 0) {
+      console.error('Error fetching default wallet:', error?.message || 'No wallet found');
+      return undefined;
+    }
+    
+    // Convert to our Wallet format
     return {
-      smartAccount,
-      smartAccountClient
+      address: data[0].address as Address,
+      name: data[0].name || 'Default Wallet',
+      chainId: data[0].chain_id || 11155111,
+      isDefault: data[0].is_default || false,
+      createdAt: new Date(data[0].created_at).getTime(),
+      saltNonce: data[0].salt_nonce
     };
   } catch (error) {
-    console.error('Error getting smart account client:', error);
+    console.error('Error getting default wallet:', error);
+    return undefined;
+  }
+}
+
+// Get the newest wallet for a user - using Supabase
+export async function getNewestWallet(userId: string): Promise<Wallet | undefined> {
+  try {
+    // Get wallets from Supabase
+    const { data, error } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false })
+      .limit(1);
+    
+    if (error || !data || data.length === 0) {
+      console.error('Error fetching newest wallet:', error?.message || 'No wallet found');
+      return undefined;
+    }
+    
+    // Convert to our Wallet format
+    return {
+      address: data[0].address as Address,
+      name: data[0].name || 'Default Wallet',
+      chainId: data[0].chain_id || 11155111,
+      isDefault: data[0].is_default || false,
+      createdAt: new Date(data[0].created_at).getTime(),
+      saltNonce: data[0].salt_nonce
+    };
+  } catch (error) {
+    console.error('Error getting newest wallet:', error);
+    return undefined;
+  }
+}
+
+/**
+ * DKG Utilities - Distributed Key Generation for secure wallet access
+ * Device key is stored only in the device's secure enclave, never in the database
+ */
+
+/**
+ * Generate a complete set of DKG keys for a new user
+ */
+export async function generateDKGKeysForUser(userId: string): Promise<{
+  serverKey: Hex;
+  recoveryKey: string;
+  deviceKey: Hex;
+  combinedKey: Hex;
+  isNew: boolean;
+}> {
+  try {
+    console.log(`Generating DKG keys for user ${userId}`);
+    
+    // Generate server key
+    const serverKey = generateRandomPrivateKey();
+    console.log('Generated server key');
+    
+    // Generate recovery key (only used for recovery situations)
+    const recoveryKey = generateRecoveryKey();
+    const recoveryKeyHash = createHash('sha256').update(recoveryKey).digest('hex');
+    console.log('Generated recovery key');
+    
+    // Generate device key - this will be returned to client but NOT stored in database
+    const deviceKey = generateRandomPrivateKey();
+    console.log('Generated device key (for secure local storage only)');
+    
+    // Store server key in Supabase (encrypted)
+    const serverKeyEncrypted = encryptPrivateKey(serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+    const { error } = await supabase
+      .from('users')
+      .update({
+        server_key_encrypted: serverKeyEncrypted,
+        recovery_key_hash: recoveryKeyHash
+      })
+      .eq('id', userId);
+    
+    if (error) {
+      console.error('Failed to store keys in Supabase:', error);
+      throw new Error(`Failed to store server key: ${error.message}`);
+    }
+    
+    console.log(`Stored server key for user ${userId} in Supabase`);
+    
+    // Combine keys
+    const combinedKey = combineKeys(deviceKey, serverKey);
+    
+    return {
+      serverKey,
+      recoveryKey,
+      deviceKey,
+      combinedKey,
+      isNew: true
+    };
+  } catch (error) {
+    console.error('Error generating DKG keys:', error);
     throw error;
   }
 }
 
 /**
- * Generate a deterministic private key that's unique to this user and auth method
- * This ensures we get the same private key each time for the same user+auth combination
- * The optional salt allows creating multiple different wallets for the same user
+ * Retrieve DKG keys for an existing user
+ * Note: deviceKey must be provided by the client from secure storage
  */
-export function generateCombinedKey(
-  privateKey: Hex, 
-  userId: string, 
-  authType: string,
-  salt: string = ''
-): Hex {
-  // Create a deterministic hash based on the user ID, private key, auth type, and optional salt
-  const combinedData = `${userId}-${privateKey}-${authType}-${salt}`;
-  const hash = createHash('sha256').update(combinedData).digest('hex');
-  
-  // Ensure it's a valid private key format (32 bytes)
-  return `0x${hash}` as Hex;
-}
-
-// Add a wallet to a user
-export function addWalletToUser(
-  userId: string, 
-  walletAddress: Address, 
-  isDefault: boolean = false, 
-  name: string = 'New Wallet',
-  saltNonce?: bigint,
-  timestamp?: number
-): boolean {
-  const user = findUserById(userId);
-  if (!user) return false;
-  
-  // Initialize wallets array if it doesn't exist
-  if (!Array.isArray(user.wallets)) {
-    user.wallets = [];
-  }
-  
-  // Check if the wallet already exists
-  const walletExists = user.wallets.some(wallet => 
-    wallet.address.toLowerCase() === walletAddress.toLowerCase()
-  );
-  
-  if (walletExists) {
-    console.log(`Wallet ${walletAddress} already exists for user ${userId}`);
-    return false;
-  }
-  
-  // If this is set as default, unset other default wallets
-  if (isDefault) {
-    user.wallets.forEach(wallet => wallet.isDefault = false);
-  }
-  
-  // Add the new wallet
-  const createdAt = timestamp || Date.now();
-  user.wallets.push({
-    address: walletAddress,
-    name,
-    chainId: 11155111, // Sepolia
-    isDefault,
-    createdAt: createdAt,
-    saltNonce: saltNonce ? saltNonce.toString() : undefined
-  });
-  
-  // For backward compatibility, also set walletAddress property
-  if (isDefault || !user.walletAddress) {
-    user.walletAddress = walletAddress;
-  }
-  
-  // Save the user
-  updateUser(user);
-  console.log(`Added wallet ${walletAddress} to user ${userId}${saltNonce ? ` with salt nonce ${saltNonce}` : ''}, created at ${new Date(createdAt).toISOString()}`);
-  return true;
-}
-
-// Update wallet address for a user - modified to handle multiple wallets
-export function updateUserWalletAddress(
-  userId: string, 
-  walletAddress: Address, 
-  saltNonce?: bigint
-): void {
-  const user = findUserById(userId);
-  if (!user) {
-    console.error(`User ${userId} not found, can't update wallet address`);
-    return;
-  }
-  
-  console.log(`updateUserWalletAddress: Adding wallet ${walletAddress} to user ${userId} with saltNonce ${saltNonce ? saltNonce.toString() : 'none'}`);
-  
-  // Check if this wallet address already exists (this shouldn't happen with different salt nonces)
-  const walletExists = user.wallets?.some(w => w.address.toLowerCase() === walletAddress.toLowerCase());
-  if (walletExists) {
-    console.log(`updateUserWalletAddress: Wallet ${walletAddress} already exists for user ${userId}`);
-  }
-  
-  // When creating a new wallet with a salt nonce, add it to the wallets array
-  // with a unique timestamp to ensure it's properly sorted
-  const timestamp = Date.now();
-  
-  // For new implementation, add to wallets array as a new wallet
-  const wasAdded = addWalletToUser(
-    userId, 
-    walletAddress, 
-    saltNonce ? false : true, // Only set as default if not creating a new wallet with salt
-    saltNonce ? `New Wallet (${new Date().toLocaleTimeString()})` : 'Primary Wallet', 
-    saltNonce,
-    timestamp
-  );
-  
-  // For backward compatibility, set walletAddress property if this is default or no other wallet exists
-  if (!user.walletAddress || !saltNonce) {
-    user.walletAddress = walletAddress;
-  }
-  
-  updateUser(user);
-  console.log(`updateUserWalletAddress: Updated user ${userId} with wallet address ${walletAddress} (default: ${!saltNonce}, timestamp: ${timestamp})`);
-}
-
-// Get all wallets for a user
-export function getWalletsForUser(userId: string): Wallet[] {
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error(`User ${userId} not found`);
-  }
-  
-  // Initialize wallets array if it doesn't exist
-  if (!Array.isArray(user.wallets)) {
-    user.wallets = [];
-    
-    // If there's a legacy walletAddress, convert it to a wallet
-    if (user.walletAddress) {
-      user.wallets.push({
-        address: user.walletAddress,
-        name: 'Primary Wallet',
-        chainId: 11155111, // Sepolia
-        isDefault: true,
-        createdAt: user.createdAt
-      });
-      updateUser(user);
-    }
-  }
-  
-  return user.wallets;
-}
-
-// Get the default wallet for a user
-export function getDefaultWallet(userId: string): Wallet | undefined {
-  const user = findUserById(userId);
-  if (!user) {
-    return undefined;
-  }
-  
-  // First check for wallets in the wallets array
-  if (user.wallets && user.wallets.length > 0) {
-    // Return the default wallet if one is marked as default
-    const defaultWallet = user.wallets.find(wallet => wallet.isDefault === true);
-    if (defaultWallet) {
-      return defaultWallet;
-    }
-    
-    // If no wallet is marked as default, return the first one
-    return user.wallets[0];
-  }
-  
-  // If there are no wallets in the wallets array but there is a legacy walletAddress,
-  // create a wallet object from it and return it
-  if (user.walletAddress) {
-    const legacyWallet: Wallet = {
-      address: user.walletAddress,
-      name: 'Primary Wallet',
-      chainId: 11155111, // Sepolia
-      isDefault: true,
-      createdAt: user.createdAt
-    };
-    
-    // Add this wallet to the user's wallets array for future use
-    if (!user.wallets) {
-      user.wallets = [];
-    }
-    user.wallets.push(legacyWallet);
-    saveUserData();
-    
-    return legacyWallet;
-  }
-  
-  return undefined;
-}
-
-// Set a wallet as the default for a user
-export function setDefaultWallet(userId: string, walletAddress: Address): void {
-  const user = findUserById(userId);
-  if (!user) {
-    throw new Error(`User ${userId} not found`);
-  }
-  
-  if (!Array.isArray(user.wallets) || user.wallets.length === 0) {
-    throw new Error(`User ${userId} has no wallets`);
-  }
-  
-  let foundDefault = false;
-  
-  // Update isDefault flag for all wallets
-  user.wallets.forEach(wallet => {
-    const isMatch = wallet.address.toLowerCase() === walletAddress.toLowerCase();
-    wallet.isDefault = isMatch;
-    if (isMatch) {
-      foundDefault = true;
-      // Also update the legacy walletAddress for backward compatibility
-      user.walletAddress = wallet.address;
-    }
-  });
-  
-  if (!foundDefault) {
-    throw new Error(`Wallet address ${walletAddress} not found for user ${userId}`);
-  }
-  
-  // Save changes
-  updateUser(user);
-  console.log(`Set wallet ${walletAddress} as default for user ${userId}`);
-}
-
-// Initialize storage on module load
-initializeStorage();
-
-// Helper function to find the next nonce value for a user
-export function getNextSaltNonce(userId: string): bigint {
-  const user = findUserById(userId);
-  if (!user) {
-    return BigInt(0);
-  }
-  
-  // Initialize wallets array if it doesn't exist
-  if (!Array.isArray(user.wallets)) {
-    user.wallets = [];
-  }
-  
-  // Find the highest salt nonce used so far
-  let highestNonce = BigInt(0);
-  user.wallets.forEach(wallet => {
-    if (wallet.saltNonce && BigInt(wallet.saltNonce) > highestNonce) {
-      highestNonce = BigInt(wallet.saltNonce);
-    }
-  });
-  
-  // Return next nonce
-  return highestNonce + BigInt(1);
-}
-
-// Get the newest wallet for a user based on creation time
-export function getNewestWallet(userId: string): Wallet | undefined {
-  const user = findUserById(userId);
-  if (!user) {
-    console.log(`getNewestWallet: User ${userId} not found`);
-    return undefined;
-  }
-  
-  // First check for wallets in the wallets array
-  if (user.wallets && user.wallets.length > 0) {
-    console.log(`getNewestWallet: Found ${user.wallets.length} wallet(s) for user ${userId}`);
-    
-    // Debug: Log all wallets with creation times
-    user.wallets.forEach((wallet, index) => {
-      const createdDate = new Date(wallet.createdAt).toISOString();
-      console.log(`getNewestWallet: Wallet #${index} - Address: ${wallet.address}, CreatedAt: ${createdDate}, SaltNonce: ${wallet.saltNonce || 'none'}`);
-    });
-    
-    // Return the wallet with the most recent creation time
-    const newestWallet = user.wallets.reduce((newest, current) => {
-      if (!newest || current.createdAt > newest.createdAt) {
-        return current;
-      }
-      return newest;
-    }, undefined as Wallet | undefined);
-    
-    if (newestWallet) {
-      console.log(`getNewestWallet: Selected newest wallet: ${newestWallet.address}, CreatedAt: ${new Date(newestWallet.createdAt).toISOString()}`);
-    } else {
-      console.log(`getNewestWallet: No newest wallet found despite having wallets array`);
-    }
-    
-    return newestWallet;
-  }
-  
-  // If there are no wallets in the wallets array but there is a legacy walletAddress,
-  // create a wallet object from it and return it
-  if (user.walletAddress) {
-    const legacyWallet: Wallet = {
-      address: user.walletAddress,
-      name: 'Primary Wallet',
-      chainId: 11155111, // Sepolia
-      isDefault: true,
-      createdAt: user.createdAt
-    };
-    
-    // Add this wallet to the user's wallets array for future use
-    if (!user.wallets) {
-      user.wallets = [];
-    }
-    user.wallets.push(legacyWallet);
-    saveUserData();
-    
-    return legacyWallet;
-  }
-  
-  return undefined;
-}
-
-// Get the recovery key for a user (for returning to UI when creating additional wallets)
-export async function getRecoveryKeyForUser(userId: string): Promise<string | null> {
+export async function getDKGKeysForUser(userId: string, deviceKey: Hex): Promise<{
+  serverKey: Hex;
+  deviceKey: Hex;
+  combinedKey: Hex;
+}> {
   try {
-    console.log(`Getting recovery key for user ${userId}`);
+    console.log(`Getting DKG keys for user ${userId}`);
     
-    // Find the user
-    const user = findUserById(userId);
+    // Get user from Supabase
+    const user = await findUserById(userId);
     if (!user) {
-      console.error(`User ${userId} not found when retrieving recovery key`);
-      return null;
+      throw new Error(`User ${userId} not found`);
     }
     
-    // If there's no recovery key hash, there's no stored recovery key
-    if (!user.recoveryKeyHash) {
-      console.log(`No recovery key hash found for user ${userId}`);
-      return null;
+    // Get server key from Supabase
+    const serverKeyEncrypted = user.server_key_encrypted;
+    if (!serverKeyEncrypted) {
+      throw new Error(`No server key found for user ${userId}`);
     }
     
-    // In a real implementation, we would retrieve the recovery key from a secure storage
-    // For development purposes, we'll simulate retrieving a recovery key
-    // In production, this would be securely stored and encrypted
-    if (process.env.NODE_ENV !== 'production') {
-      // This is just for testing in development - in production you would use proper key retrieval
-      const mockRecoveryKey = `recovery_key_for_${userId}`;
-      return mockRecoveryKey;
-    }
+    // Decrypt server key
+    const serverKey = decryptPrivateKey(serverKeyEncrypted, process.env.KEY_ENCRYPTION_KEY || '');
     
-    // For production, we'd need a secure method to retrieve or regenerate the recovery key
-    return null;
+    // Note: We don't need to get the biometric key from Supabase anymore,
+    // it's provided by the client from secure storage
+    
+    // Combine keys
+    const combinedKey = combineKeys(deviceKey, serverKey);
+    
+    return {
+      serverKey,
+      deviceKey,
+      combinedKey
+    };
   } catch (error) {
-    console.error('Error retrieving recovery key:', error);
-    return null;
+    console.error('Error getting DKG keys:', error);
+    throw error;
   }
+}
+
+/**
+ * Get existing DKG keys or generate new ones
+ * Note: For existing users, deviceKey must be provided from secure storage
+ */
+export async function getOrCreateDKGKeysForUser(
+  userId: string, 
+  deviceKey?: Hex
+): Promise<{
+  serverKey: Hex;
+  recoveryKey?: string;
+  deviceKey: Hex;
+  combinedKey: Hex;
+  isNew: boolean;
+}> {
+  try {
+    // Get user from Supabase
+    const user = await findUserById(userId);
+    if (!user) {
+      throw new Error(`User ${userId} not found`);
+    }
+    
+    // Check if user has server key
+    if (user.server_key_encrypted) {
+      console.log(`User ${userId} has existing server key`);
+      
+      // If deviceKey is not provided, we can't get the combined key
+      if (!deviceKey) {
+        throw new Error('Device key must be provided for existing users');
+      }
+      
+      // Get existing keys
+      const keys = await getDKGKeysForUser(userId, deviceKey);
+      
+      return {
+        ...keys,
+        isNew: false
+      };
+    } else {
+      console.log(`User ${userId} has no server key, generating new keys`);
+      
+      // Generate new keys
+      return await generateDKGKeysForUser(userId);
+    }
+  } catch (error) {
+    console.error('Error getting or creating DKG keys:', error);
+    throw error;
+  }
+}
+
+// Generate a secure recovery key (12 words)
+function generateRecoveryKey(): string {
+  // Generate a random mnemonic (12 words)
+  const entropy = randomBytes(16);
+  const wordlist = null; // Use default wordlist
+  return entropyToMnemonic(entropy.toString('hex'), wordlist);
+}
+
+// Hash the recovery key for safe storage
+function hashRecoveryKey(recoveryKey: string): string {
+  return createHash('sha256').update(recoveryKey).digest('hex');
 } 

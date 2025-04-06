@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
+import { supabase } from '@/lib/supabase/client';
 
 export async function GET(request: NextRequest) {
   try {
@@ -8,6 +9,24 @@ export async function GET(request: NextRequest) {
     
     const cookieStore = cookies();
     const walletAddress = cookieStore.get('walletAddress')?.value;
+    
+    // Check if there are any authenticators in Supabase
+    let hasAuthenticators = false;
+    try {
+      const { data, error } = await supabase
+        .from('authenticators')
+        .select('id')
+        .limit(1);
+      
+      if (!error && data && data.length > 0) {
+        console.log('API: Found authenticators in Supabase');
+        hasAuthenticators = true;
+      } else {
+        console.log('API: No authenticators found in Supabase');
+      }
+    } catch (e) {
+      console.log('API: Error checking for authenticators in Supabase', e);
+    }
     
     // Generate a random challenge
     const randomBytes = crypto.randomBytes(32);
@@ -52,7 +71,7 @@ export async function GET(request: NextRequest) {
     return NextResponse.json({
       success: true,
       challenge: challengeBase64,
-      walletVerification: !!walletAddress
+      walletVerification: !!walletAddress || hasAuthenticators
     });
   } catch (error) {
     console.error('Error generating challenge:', error);

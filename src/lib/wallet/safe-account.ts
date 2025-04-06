@@ -1,11 +1,10 @@
 import { createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
-import { ISigner } from '@zerodev/sdk';
-import { privateKeyToAccount } from 'viem/accounts';
+import { privateKeyToAccount, type Account } from 'viem/accounts';
 import { Hex } from 'viem';
-import { findUserById, decryptPrivateKey } from '@/lib/utils/user-store';
+import { findUserById, decryptPrivateKey, getDKGKeysForUser } from '@/lib/utils/user-store';
 import { createHash } from 'crypto';
 
-export async function createSafeAccountClient(signer: ISigner) {
+export async function createSafeAccountClient(signer: Account) {
   const publicClient = createChainPublicClient();
   const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
   const smartAccount = await createSafeSmartAccount(publicClient, signer);
@@ -30,36 +29,46 @@ export async function createSafeAccountClient(signer: ISigner) {
 export async function createSafeAccountFromBiometric(userId: string, deviceKey: Hex): Promise<{
   address: string;
   combinedKey: Hex;
-  clientSetup: ReturnType<typeof createSafeAccountClient> & {
-    owner: ReturnType<typeof privateKeyToAccount>;
+  clientSetup: {
+    owner: Account;
+    smartAccount: any;
+    smartAccountClient: any;
+    publicClient: any;
+    pimlicoClient: any;
   };
 }> {
-  const user = findUserById(userId);
-  if (!user || !user.serverKey) {
-    throw new Error('User or server key not found');
+  try {
+    // Note: deviceKey is now provided directly from the client's secure storage
+    // We don't check it against any stored value because we don't store it anymore
+    
+    // Get DKG keys using the provided device key
+    const { serverKey, combinedKey } = await getDKGKeysForUser(userId, deviceKey);
+    
+    // Use the combined key from DKG
+    const owner = privateKeyToAccount(combinedKey);
+    console.log(`Using DKG combined key to create owner with address: ${owner.address}`);
+
+    const publicClient = createChainPublicClient();
+    const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+    const smartAccount = await createSafeSmartAccount(publicClient, owner);
+
+    const activeChain = getActiveChain();
+    const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+    const smartAccountClient = createSmartAccountClientWithPaymaster(smartAccount, pimlicoClient, pimlicoUrl);
+
+    return {
+      address: smartAccount.address,
+      combinedKey,
+      clientSetup: {
+        publicClient,
+        pimlicoClient,
+        smartAccount,
+        smartAccountClient,
+        owner,
+      }
+    };
+  } catch (error) {
+    console.error('Error creating Safe account from biometric:', error);
+    throw error;
   }
-
-  const serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || '');
-  const combinedKey = `0x${createHash('sha256').update(deviceKey + serverKey).digest('hex')}` as Hex;
-  const owner = privateKeyToAccount(combinedKey);
-
-  const publicClient = createChainPublicClient();
-  const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
-  const smartAccount = await createSafeSmartAccount(publicClient, owner);
-
-  const activeChain = getActiveChain();
-  const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
-  const smartAccountClient = createSmartAccountClientWithPaymaster(smartAccount, pimlicoClient, pimlicoUrl);
-
-  return {
-    address: smartAccount.address,
-    combinedKey,
-    clientSetup: {
-      publicClient,
-      pimlicoClient,
-      smartAccount,
-      smartAccountClient,
-      owner,
-    }
-  };
 }

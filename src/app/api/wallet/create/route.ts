@@ -4,17 +4,17 @@ import { type Address } from 'viem';
 import { 
   findUserById, 
   createSmartAccountFromCredential,
-  storeKeys,
-  getNextSaltNonce
+  getOrCreateDKGKeysForUser,
+  generateRandomPrivateKey
 } from '@/lib/utils/user-store';
-import { generateRandomPrivateKey } from '@/lib/utils/key-encryption';
+import { supabase } from '@/lib/supabase/client';
 
 export async function POST(request: NextRequest) {
   try {
     console.log('API: Wallet creation endpoint called');
     
     const body = await request.json();
-    const { userId, forceCreate = false, createNewWallet = false, randomSalt } = body;
+    const { userId, deviceKey, forceCreate = false, createNewWallet = false, randomSalt } = body;
     
     if (!userId) {
       return NextResponse.json({ 
@@ -23,10 +23,10 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    console.log(`API: Creating wallet for user ${userId}. Force create: ${forceCreate}, Create new wallet: ${createNewWallet}, Random salt: ${randomSalt}`);
+    console.log(`API: Creating wallet for user ${userId}. Force create: ${forceCreate}, Create new wallet: ${createNewWallet}`);
     
-    // Get user from storage
-    const user = findUserById(userId);
+    // Get user from Supabase
+    const user = await findUserById(userId);
     if (!user) {
       return NextResponse.json({ 
         success: false, 
@@ -35,51 +35,49 @@ export async function POST(request: NextRequest) {
     }
     
     // Check if user already has a wallet and we're not forcing creation or creating a new wallet
-    if (user.walletAddress && !forceCreate && !createNewWallet) {
-      console.log(`API: User ${userId} already has a wallet: ${user.walletAddress}`);
+    if (user.wallets.length > 0 && !forceCreate && !createNewWallet) {
+      const defaultWallet = user.wallets.find(w => w.isDefault) || user.wallets[0];
+      console.log(`API: User ${userId} already has a wallet: ${defaultWallet.address}`);
       return NextResponse.json({ 
         success: true, 
-        walletAddress: user.walletAddress,
+        walletAddress: defaultWallet.address,
         message: 'Existing wallet found',
         isExistingWallet: true
       });
     }
     
-    // Generate keys if needed (for new wallets)
-    // Skip if we're using an existing credential that already has keys
-    let recoveryKey;
-    
-    if (!user.biometricKey) {
-      console.log(`API: Generating new keys for user ${userId}`);
-      const deviceKey = generateRandomPrivateKey();
-      const serverKey = generateRandomPrivateKey();
-      recoveryKey = generateRandomPrivateKey();
-      
-      // Store the keys
-      await storeKeys(userId, deviceKey, serverKey, recoveryKey);
-      
-      console.log('API: Keys generated and stored');
-    } else {
-      console.log(`API: Using existing biometric key for user ${userId}`);
+    // Check for device key - critical for DKG
+    if (!deviceKey) {
+      console.warn('Missing device key in wallet creation request');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Device key is required for DKG wallet creation. You must update your client to the latest version.',
+        needsDeviceKey: true
+      }, { status: 400 });
     }
     
-    // If we're creating a new wallet with an existing biometric key, 
+    // Generate or get existing DKG keys
+    console.log('API: Getting or creating DKG keys');
+    const { recoveryKey, isNew } = await getOrCreateDKGKeysForUser(userId, deviceKey);
+    
+    if (isNew) {
+      console.log('API: Created new DKG keys for user');
+    } else {
+      console.log('API: Using existing DKG keys for user');
+    }
+    
+    // If we're creating a new wallet with existing keys, 
     // we need to use a different salt nonce
     let saltNonce;
-    if (createNewWallet && user.walletAddress) {
+    if (createNewWallet && user.wallets.length > 0) {
       // If a random salt is provided, use it directly
       if (randomSalt) {
         saltNonce = BigInt(randomSalt);
         console.log(`API: Using provided random salt nonce: ${saltNonce}`);
       } else {
-        saltNonce = getNextSaltNonce(userId);
-        console.log(`API: Creating new wallet with salt nonce: ${saltNonce}`);
-      }
-      
-      // FORCE a non-zero value to ensure we get a new address
-      if (saltNonce === BigInt(0)) {
+        // Generate a random salt nonce between 1 and 1,000,000
         saltNonce = BigInt(Math.floor(Math.random() * 1000000) + 1);
-        console.log(`API: Forcing non-zero salt nonce: ${saltNonce}`);
+        console.log(`API: Creating new wallet with random salt nonce: ${saltNonce}`);
       }
     }
     
@@ -88,6 +86,7 @@ export async function POST(request: NextRequest) {
       console.log(`API: Creating smart account for user ${userId}`);
       const result = await createSmartAccountFromCredential(
         userId, 
+        deviceKey,
         'biometric', 
         forceCreate || createNewWallet,
         saltNonce
@@ -123,7 +122,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         walletAddress: result.address,
-        recoveryKey,
+        recoveryKey: isNew ? recoveryKey : undefined,
         isExistingWallet: isExistingWallet || false,
         message: isExistingWallet 
           ? 'Existing wallet found' 

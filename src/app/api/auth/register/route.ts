@@ -2,8 +2,9 @@ import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { randomBytes } from 'crypto';
 import { generateRegistrationOptions } from '@simplewebauthn/server';
-import { createUser, rpName, rpID, origin } from '@/lib/utils/user-store';
+import { rpName, rpID, origin } from '@/lib/utils/user-store';
 import { generateDistributedKeys } from '@/lib/utils/key-encryption';
+import { supabase } from '@/lib/supabase/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -63,16 +64,36 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // Create a new user
-    const newUser = createUser(username, 'biometric');
-    console.log(`API: Created new user: ${newUser.id} (${username})`);
+    // Generate a unique user ID
+    const userId = `user_${Date.now()}_${randomBytes(4).toString('hex')}`;
+    console.log(`API: Generated new user ID: ${userId}`);
+    
+    // Create user ONLY in Supabase - no file system
+    const { data: userData, error: userError } = await supabase
+      .from('users')
+      .insert({
+        id: userId,
+        username: username,
+        created_at: new Date().toISOString()
+      })
+      .select();
+    
+    if (userError) {
+      console.error('API: Error creating user in Supabase:', userError);
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Failed to create user account' 
+      }, { status: 500 });
+    }
+    
+    console.log('API: User created in Supabase');
     
     // Generate DKG keys
     const { deviceKey, serverKey, recoveryKey } = generateDistributedKeys();
     console.log('API: Generated distributed keys');
     
     // Convert userId to Uint8Array for WebAuthn
-    const userIdBuffer = new TextEncoder().encode(newUser.id);
+    const userIdBuffer = new TextEncoder().encode(userId);
     
     try {
       // Generate WebAuthn registration options - letting the library generate a challenge
@@ -104,7 +125,7 @@ export async function POST(request: NextRequest) {
         maxAge: 5 * 60, // 5 minutes
       });
       
-      cookieStore.set('register_user_id', newUser.id, {
+      cookieStore.set('register_user_id', userId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',

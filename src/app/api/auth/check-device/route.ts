@@ -1,6 +1,6 @@
 import { cookies } from 'next/headers';
 import { NextResponse } from 'next/server';
-import { userAccounts } from '@/lib/utils/user-store';
+import { supabase } from '@/lib/supabase/client';
 import { v4 as uuidv4 } from 'uuid';
 
 export async function GET() {
@@ -19,10 +19,16 @@ export async function GET() {
     });
   }
 
-  // Check if any user has a credential matching this deviceId
-  const registered = userAccounts.some(user =>
-    user.credentials?.some((cred: any) => cred.deviceId === deviceId)
-  );
+  // Check if any authenticator exists with this deviceId
+  // This is a simplification - we'd need to actually store deviceId with authenticators
+  // in Supabase for this to work properly
+  const { data, error } = await supabase
+    .from('authenticators')
+    .select('count')
+    .limit(1);
+  
+  // For now, just check if any authenticators exist
+  const registered = data && data.length > 0;
 
   return NextResponse.json({ registered });
 }

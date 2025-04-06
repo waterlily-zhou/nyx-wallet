@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { findUserById, getNewestWallet } from '@/lib/utils/user-store';
+import { findUserById } from '@/lib/utils/user-store';
 import { createPublicClientForSepolia } from '@/lib/client-setup';
+import { supabase } from '@/lib/supabase/client';
 
 export async function POST(request: NextRequest) {
   try {
@@ -18,8 +19,8 @@ export async function POST(request: NextRequest) {
     
     console.log(`API: Checking wallet creation status for user ${userId}, createNewWallet: ${createNewWallet}`);
     
-    // Get user from storage
-    const user = findUserById(userId);
+    // Get user from Supabase
+    const user = await findUserById(userId);
     if (!user) {
       return NextResponse.json({ 
         success: false, 
@@ -27,36 +28,52 @@ export async function POST(request: NextRequest) {
       }, { status: 404 });
     }
     
-    // If we're checking for a new wallet, look at the newest wallet instead
-    // of the default one (which is typically the first/oldest wallet)
+    // Get wallets from Supabase
+    const { data: wallets, error: walletsError } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', userId)
+      .order('created_at', { ascending: false });
+    
+    if (walletsError) {
+      console.error('API: Error fetching wallets:', walletsError);
+      return NextResponse.json({
+        success: false,
+        error: 'Error fetching wallet data',
+        isCreating: false,
+        isCreated: false
+      }, { status: 500 });
+    }
+    
+    // If we're checking for a new wallet, look at the newest wallet
+    // Otherwise, look for the default wallet
     let walletAddress;
     
-    if (createNewWallet) {
-      const newestWallet = getNewestWallet(userId);
-      if (newestWallet) {
+    if (wallets && wallets.length > 0) {
+      if (createNewWallet) {
+        // Get the newest wallet based on created_at timestamp
+        const newestWallet = wallets[0]; // Already sorted by created_at desc
         walletAddress = newestWallet.address;
         console.log(`API: Found newest wallet address: ${walletAddress}`);
         console.log(`API: Wallet details: ${JSON.stringify({
           address: newestWallet.address,
-          createdAt: newestWallet.createdAt,
-          saltNonce: newestWallet.saltNonce
+          createdAt: newestWallet.created_at,
+          saltNonce: newestWallet.salt_nonce
         })}`);
       } else {
-        console.log(`API: No newest wallet found for user ${userId}`);
+        // Get the default wallet
+        const defaultWallet = wallets.find(w => w.is_default) || wallets[0];
+        walletAddress = defaultWallet.address;
+        console.log(`API: Using default wallet address: ${walletAddress}`);
       }
-    } else {
-      walletAddress = user.walletAddress;
-      console.log(`API: Using default wallet address: ${walletAddress}`);
-    }
-    
-    // Debug - log all wallets for this user
-    if (user.wallets && user.wallets.length > 0) {
-      console.log(`API: User has ${user.wallets.length} wallet(s):`);
-      user.wallets.forEach((wallet, index) => {
-        console.log(`API: Wallet #${index}: ${wallet.address}, created: ${new Date(wallet.createdAt).toISOString()}, saltNonce: ${wallet.saltNonce || 'none'}`);
+      
+      // Debug - log all wallets for this user
+      console.log(`API: User has ${wallets.length} wallet(s):`);
+      wallets.forEach((wallet, index) => {
+        console.log(`API: Wallet #${index}: ${wallet.address}, created: ${wallet.created_at}, saltNonce: ${wallet.salt_nonce || 'none'}`);
       });
     } else {
-      console.log(`API: User has no wallets array or it's empty`);
+      console.log(`API: User has no wallets`);
     }
     
     // If user already has a wallet address in our records, verify it on-chain
@@ -123,10 +140,10 @@ export async function POST(request: NextRequest) {
       }
     }
     
-    // No wallet address in records - check if we have a biometric key
+    // No wallet address in records - check if we have a server key
     // which would indicate creation is in progress
-    if (user.biometricKey) {
-      console.log(`API: User has biometric key but no wallet address yet`);
+    if (user.server_key_encrypted) {
+      console.log(`API: User has server key but no wallet address yet`);
       return NextResponse.json({
         success: true,
         isCreating: true,
@@ -135,7 +152,7 @@ export async function POST(request: NextRequest) {
       });
     }
     
-    // No wallet and no biometric key means nothing is in progress
+    // No wallet and no server key means nothing is in progress
     return NextResponse.json({
       success: false,
       isCreating: false,

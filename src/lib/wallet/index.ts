@@ -5,6 +5,7 @@ import { createHash } from 'crypto';
 import { ClientSetup, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
 import { generateRandomPrivateKey, encryptServerKey } from '@/lib/utils/key-encryption';
 import { EncryptedKey } from '@/lib/types/credentials';
+import { supabase } from '@/lib/supabase/client';
 
 export type WalletCreationParams = {
   method: 'biometric';
@@ -22,40 +23,70 @@ export async function createWallet(params: WalletCreationParams): Promise<{
 
     if (method === 'biometric') {
       console.log('Finding user by ID:', userId);
-      const user = findUserById(userId);
+      const user = await findUserById(userId);
       if (!user) {
         throw new Error('User not found');
       }
       
-      // If no server key exists, generate one
-      if (!user.serverKey) {
-        console.log(`User ${userId} doesn't have a server key. Generating a new one...`);
-        const newServerKey = generateRandomPrivateKey();
-        // Use the server key encryption function which returns an EncryptedKey object
-        user.serverKey = encryptServerKey(newServerKey);
-        updateUser(user);
-        console.log('New server key generated and stored.');
+      // Check if we need to update the user with keys
+      let needsServerKey = false;
+      let needsBiometricKey = false;
+      
+      // If no server key exists, we'll need to generate one
+      if (!user.serverKey && !user.server_key_encrypted) {
+        console.log(`User ${userId} doesn't have a server key. Will generate a new one...`);
+        needsServerKey = true;
       }
 
-      // If no biometric key exists, generate one
+      // If no biometric key exists, we'll need to generate one
       if (!user.biometricKey) {
-        console.log(`User ${userId} doesn't have a biometric key. Generating a new one...`);
-        const newBiometricKey = generateRandomPrivateKey();
-        user.biometricKey = encryptPrivateKey(newBiometricKey, userId);
-        updateUser(user);
-        console.log('New biometric key generated and stored.');
+        console.log(`User ${userId} doesn't have a biometric key. Will generate a new one...`);
+        needsBiometricKey = true;
+      }
+      
+      // Generate and store keys if needed
+      if (needsServerKey || needsBiometricKey) {
+        const updates: any = {};
+        
+        if (needsServerKey) {
+          const newServerKey = generateRandomPrivateKey();
+          // Store as encrypted string for Supabase
+          updates.server_key_encrypted = encryptPrivateKey(newServerKey, userId);
+          console.log('New server key generated.');
+        }
+        
+        if (needsBiometricKey) {
+          const newBiometricKey = generateRandomPrivateKey();
+          updates.biometric_key = encryptPrivateKey(newBiometricKey, userId);
+          console.log('New biometric key generated.');
+        }
+        
+        // Update the user in Supabase
+        const { error } = await supabase
+          .from('users')
+          .update(updates)
+          .eq('id', userId);
+          
+        if (error) {
+          console.error('Error updating user keys:', error);
+          throw new Error('Failed to store encryption keys');
+        }
+        
+        console.log('New keys stored in Supabase.');
       }
 
-      console.log('Decrypting server key');
-      // Handle server key based on its type (string or EncryptedKey)
-      let serverKey: Hex;
-      if (typeof user.serverKey === 'string') {
-        serverKey = decryptPrivateKey(user.serverKey, process.env.KEY_ENCRYPTION_KEY || 'default_key');
+      console.log('Getting server key');
+      // Handle server key based on its type
+      let serverKeyStr = '';
+      if (user.serverKey && typeof user.serverKey === 'string') {
+        serverKeyStr = user.serverKey;
+      } else if (user.server_key_encrypted) {
+        serverKeyStr = user.server_key_encrypted;
       } else {
-        // Import the decryptServerKey function dynamically to avoid circular dependency
-        const { decryptServerKey } = await import('@/lib/utils/key-encryption');
-        serverKey = decryptServerKey(user.serverKey);
+        throw new Error('Cannot find valid server key');
       }
+      
+      const serverKey = decryptPrivateKey(serverKeyStr, process.env.KEY_ENCRYPTION_KEY || 'default_key');
       
       console.log('Combining keys');
       const combinedKey = `0x${createHash('sha256').update(deviceKey + serverKey).digest('hex')}` as Hex;

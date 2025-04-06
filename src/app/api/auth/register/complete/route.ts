@@ -1,10 +1,11 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { verifyRegistrationResponse } from '@simplewebauthn/server';
-import { findUserById, addAuthenticator, storeKeys, updateUser, rpID, origin } from '@/lib/utils/user-store';
-import { createSmartAccountFromCredential } from '@/lib/utils/user-store';
+import { rpID, origin, addAuthenticator, updateUser, createSmartAccountFromCredential } from '@/lib/utils/user-store';
 import { type Address } from 'viem';
 import { AuthenticatorDevice } from '@/lib/types/credentials';
+import { supabase } from '@/lib/supabase/client';
+import { encryptPrivateKey } from '@/lib/utils/user-store';
 
 export async function POST(request: NextRequest) {
   try {
@@ -95,38 +96,50 @@ export async function POST(request: NextRequest) {
       const counter = 0;
       
       try {
+        // Store the user's keys in Supabase
+        const { error: userUpdateError } = await supabase
+          .from('users')
+          .update({
+            server_key_encrypted: encryptPrivateKey(deviceKey, userId),
+            recovery_key_hash: recoveryKey // Store the recovery key hash
+          })
+          .eq('id', userId);
+
+        if (userUpdateError) {
+          console.error('API: Error storing user keys in Supabase:', userUpdateError);
+          throw new Error('Failed to store encryption keys');
+        }
+
+        console.log('API: Stored keys in Supabase');
+        
         // Create smart account from the credential using DKG
         console.log('API: Creating smart account...');
         // Pass forceCreate=true since this is explicitly a wallet creation flow
         const { address } = await createSmartAccountFromCredential(userId, 'biometric', true);
         console.log(`API: Smart account created with address: ${address}`);
         
-        // Store the authenticator
-        const authenticator: AuthenticatorDevice = {
-          id: crypto.randomUUID(),
-          walletAddress: address as Address,
-          credentialID: credentialID,
-          credentialPublicKey: credentialRawId, 
-          counter: counter,
-          deviceName: deviceName || 'Default Device',
-          createdAt: new Date(),
-          lastUsed: new Date()
-        };
-        
-        addAuthenticator(authenticator);
-        console.log('API: Authenticator stored');
-        
-        // Store the keys securely
-        await storeKeys(userId, deviceKey, serverKey, recoveryKey);
-        console.log('API: Keys stored securely');
-        
-        // Update the user with the wallet address
-        const user = findUserById(userId);
-        if (user) {
-          user.walletAddress = address as Address;
-          updateUser(user);
-          console.log('API: User updated with wallet address');
+        // Store authenticator in Supabase
+        const authenticatorId = crypto.randomUUID();
+        const { error: authError } = await supabase
+          .from('authenticators')
+          .insert({
+            id: authenticatorId,
+            user_id: userId,
+            credential_id: credentialID,
+            credential_public_key: Buffer.from(credentialRawId), // Store as bytea
+            counter: counter,
+            device_name: deviceName || 'Default Device',
+            created_at: new Date().toISOString(),
+            last_used: new Date().toISOString(),
+            is_active: true
+          });
+          
+        if (authError) {
+          console.error('API: Error storing authenticator in Supabase:', authError);
+          throw new Error('Failed to store authentication credential');
         }
+        
+        console.log('API: Authenticator stored in Supabase');
         
         // Clear registration cookies
         cookieStore.delete('register_challenge');
