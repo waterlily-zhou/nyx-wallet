@@ -2,7 +2,19 @@
 
 import { useState } from 'react';
 import { startRegistration } from '@simplewebauthn/browser';
+import type { PublicKeyCredentialCreationOptionsJSON } from '@simplewebauthn/typescript-types';
 import { useRouter } from 'next/navigation';
+
+// Helper function to convert base64 to Uint8Array
+function base64ToUint8Array(base64String: string): Uint8Array {
+  const binaryString = atob(base64String);
+  const len = binaryString.length;
+  const bytes = new Uint8Array(len);
+  for (let i = 0; i < len; i++) {
+    bytes[i] = binaryString.charCodeAt(i);
+  }
+  return bytes;
+}
 
 interface RegistrationOptions {
   username: string;
@@ -15,6 +27,11 @@ interface RegistrationResult {
   recoveryKey?: string;
   userId?: string;
   error?: string;
+}
+
+interface ServerResponse {
+  success: boolean;
+  options: PublicKeyCredentialCreationOptionsJSON;
 }
 
 export function useWebAuthnRegistration() {
@@ -47,16 +64,19 @@ export function useWebAuthnRegistration() {
         throw new Error(errorData.error || 'Registration failed');
       }
       
-      const { success, options } = await response.json();
+      const data = await response.json() as ServerResponse;
       
-      if (!success || !options) {
+      if (!data.success || !data.options) {
         throw new Error('Failed to get registration options');
       }
       
-      console.log('Got registration options, triggering biometric prompt...');
+      // Log the exact options we received
+      console.log('Raw registration options:', JSON.stringify(data.options, null, 2));
       
-      // Step 2: Initiate WebAuthn registration
-      const attResp = await startRegistration(options);
+      // Step 2: Initiate WebAuthn registration with properly formatted options
+      const attResp = await startRegistration({
+        optionsJSON: data.options
+      });
       
       console.log('Biometric registration successful, verifying with server...');
       

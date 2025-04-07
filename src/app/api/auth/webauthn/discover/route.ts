@@ -13,7 +13,7 @@ export async function GET(request: NextRequest) {
     
     // Generate minimal authentication options
     // This is used only for credential discovery, not validation
-    const options = await generateAuthenticationOptions({
+    const authOptions = await generateAuthenticationOptions({
       rpID,
       timeout: 60000,
       userVerification: 'preferred',
@@ -21,11 +21,16 @@ export async function GET(request: NextRequest) {
       // check for ALL credentials on the device
     });
     
-    console.log('Generated credential discovery options');
+    console.log('Generated credential discovery options:', authOptions);
     
     return NextResponse.json({
       success: true,
-      options
+      options: {
+        publicKey: {
+          ...authOptions,
+          rpId: rpID,
+        }
+      }
     });
   } catch (error) {
     console.error('Error generating credential discovery options:', error);

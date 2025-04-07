@@ -5,7 +5,7 @@
  */
 import { NextRequest, NextResponse } from 'next/server';
 import { findAuthenticatorByCredentialId } from '@/lib/utils/user-store';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {

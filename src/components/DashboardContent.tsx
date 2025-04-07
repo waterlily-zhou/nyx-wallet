@@ -29,13 +29,51 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const [isRefreshing, setIsRefreshing] = useState(false);
   const [showTransactionFlow, setShowTransactionFlow] = useState(false);
   const [networkInfo, setNetworkInfo] = useState<any>(null);
+  const [isWalletReady, setIsWalletReady] = useState(false);
   
   useEffect(() => {
     if (walletAddress) {
-      fetchTokenBalances(walletAddress);
-      fetchNetworkInfo();
+      checkWalletStatus();
     }
   }, [walletAddress]);
+
+  const checkWalletStatus = async () => {
+    try {
+      setIsRefreshing(true);
+      const response = await fetch('/api/wallet/creation-status', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          userId: walletAddress // Using wallet address as userId for now
+        })
+      });
+      
+      if (!response.ok) {
+        throw new Error('Failed to check wallet status');
+      }
+      
+      const data = await response.json();
+      if (data.success) {
+        if (data.isCreated) {
+          setIsWalletReady(true);
+          fetchTokenBalances(walletAddress);
+          fetchNetworkInfo();
+        } else if (data.isCreating) {
+          // Wallet is still being created, check again in 2 seconds
+          setTimeout(checkWalletStatus, 2000);
+        } else {
+          // Wallet not found or error
+          console.error('Wallet not found or error:', data.error);
+        }
+      }
+    } catch (err) {
+      console.error('Error checking wallet status:', err);
+    } finally {
+      setIsRefreshing(false);
+    }
+  };
 
   const fetchTokenBalances = async (address: string) => {
     try {
@@ -144,120 +182,126 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
       <div className="mb-8">
         <div className="flex items-center justify-between mb-4">
           <h1 className="text-3xl">Dashboard</h1>
-          <button 
-            onClick={refreshBalance}
-            disabled={isRefreshing}
-            className="text-violet-400 hover:text-violet-300 px-3 py-1 rounded-md border border-violet-500 flex items-center text-sm"
-          >
-            {isRefreshing ? (
-              <svg className="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
-              </svg>
-            )}
-            Refresh
-          </button>
+          {isWalletReady && (
+            <button 
+              onClick={refreshBalance}
+              disabled={isRefreshing}
+              className="text-violet-400 hover:text-violet-300 px-3 py-1 rounded-md border border-violet-500 flex items-center text-sm"
+            >
+              {isRefreshing ? (
+                <svg className="animate-spin h-4 w-4 mr-1" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                  <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                  <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                </svg>
+              ) : (
+                <svg className="h-4 w-4 mr-1" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15"></path>
+                </svg>
+              )}
+              Refresh
+            </button>
+          )}
         </div>
         
-        <div className="flex flex-row gap-16 rounded-lg p-6">
-          <div className="mb-6">
-            <p className="text-gray-500 text-sm mb-1">Total asset value</p>
-            <div className="flex items-end">
-              <h2 className="text-4xl mr-2">${totalValueUSD}</h2>
-              <p className="text-gray-400 text-sm mb-1">USD</p>
+        {!isWalletReady ? (
+          <div className="flex flex-col items-center justify-center p-8 border border-violet-500 rounded-lg">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-500 mb-4"></div>
+            <p className="text-violet-400">Creating your wallet...</p>
+            <p className="text-gray-400 text-sm mt-2">This may take a few moments</p>
+          </div>
+        ) : (
+          <>
+            <div className="flex flex-row gap-16 rounded-lg p-6">
+              <div className="mb-6">
+                <p className="text-gray-500 text-sm mb-1">Total asset value</p>
+                <div className="flex items-end">
+                  <h2 className="text-4xl mr-2">${totalValueUSD}</h2>
+                  <p className="text-gray-400 text-sm mb-1">USD</p>
+                </div>
+              </div>
+              
+              <div className="flex flex-row gap-8 ml-auto px-16">
+                <button 
+                  className="px-6 py-1.5 h-12 w-32 bg-violet-500 rounded-lg text-white hover:bg-violet-700 flex items-center"
+                  onClick={handleSendClick}
+                >
+                  <span className="mr-2">↗</span>
+                  Send
+                </button>
+                <button className="px-6 py-1.5 h-12 w-32 border border-violet-500 rounded-lg bg-transparent text-white hover:bg-violet-700/20 flex items-center">
+                  <span className="mr-2">⇲</span>
+                  Receive
+                </button>
+              </div>
             </div>
-          </div>
-          
-          <div className="flex flex-row gap-8 ml-auto px-16">
-            <button 
-              className="px-6 py-1.5 h-12 w-32 bg-violet-500 rounded-lg text-white hover:bg-violet-700 flex items-center"
-              onClick={handleSendClick}
-            >
-              <span className="mr-2">↗</span>
-              Send
-            </button>
-            <button className="px-6 py-1.5 h-12 w-32 border border-violet-500 rounded-lg bg-transparent text-white hover:bg-violet-700/20 flex items-center">
-              <span className="mr-2">⇲</span>
-              Receive
-            </button>
-          </div>
-        </div>
-      </div>
-      
-      {/* Assets List */}
-      <div>
-        <h2 className="text-xl font-bold mb-4">Assets</h2>
-        <div className="bg-zinc-900 rounded-lg overflow-hidden">
-          <div className="overflow-x-auto">
-            <table className="min-w-full divide-y divide-gray-800">
-              <thead>
-                <tr>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Asset</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Balance</th>
-                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Value</th>
-                </tr>
-              </thead>
-              <tbody className="divide-y divide-gray-800">
-                {assets.length > 0 ? (
-                  assets.map((asset, index) => (
-                    <tr key={asset.symbol + index} className="hover:bg-zinc-800">
-                      <td className="px-6 py-4 whitespace-nowrap">
-                        <div className="flex items-center">
-                          {asset.logoURI ? (
-                            <img 
-                              src={asset.logoURI} 
-                              alt={asset.symbol}
-                              className="flex-shrink-0 h-8 w-8 rounded-full"
-                            />
-                          ) : (
-                            <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">
-                              {asset.symbol.substring(0, 4)}
+            
+            {/* Assets List */}
+            <div>
+              <h2 className="text-xl font-bold mb-4">Assets</h2>
+              <div className="bg-zinc-900 rounded-lg overflow-hidden">
+                <div className="overflow-x-auto">
+                  <table className="min-w-full divide-y divide-gray-800">
+                    <thead>
+                      <tr>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Asset</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Balance</th>
+                        <th className="px-6 py-3 text-left text-xs font-medium text-gray-400 uppercase tracking-wider">Value</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-gray-800">
+                      {assets.length > 0 ? (
+                        assets.map((asset, index) => (
+                          <tr key={asset.symbol + index} className="hover:bg-zinc-800">
+                            <td className="px-6 py-4 whitespace-nowrap">
+                              <div className="flex items-center">
+                                {asset.logoURI ? (
+                                  <img 
+                                    src={asset.logoURI} 
+                                    alt={asset.symbol}
+                                    className="flex-shrink-0 h-8 w-8 rounded-full"
+                                  />
+                                ) : (
+                                  <div className="flex-shrink-0 h-8 w-8 rounded-full bg-blue-500 flex items-center justify-center text-xs font-bold">
+                                    {asset.symbol.substring(0, 4)}
+                                  </div>
+                                )}
+                                <div className="ml-4">
+                                  <div className="text-sm font-medium">{asset.name}</div>
+                                  <div className="flex items-center mt-1">
+                                    <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-900 text-green-200">
+                                      {asset.network === 'Base Sepolia' ? 'Base Sepolia' : asset.network}
+                                    </span>
+                                  </div>
+                                </div>
+                              </div>
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              {parseFloat(asset.formattedBalance) < 0.000001 && parseFloat(asset.formattedBalance) > 0
+                                ? '< 0.000001'
+                                : asset.formattedBalance} {asset.symbol}
+                            </td>
+                            <td className="px-6 py-4 whitespace-nowrap text-sm">
+                              ${parseFloat(asset.valueUSD) < 0.01 ? '< 0.01' : parseFloat(asset.valueUSD).toFixed(2)}
+                            </td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
+                            <div className="flex justify-center mb-4">
+                              <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-500"></div>
                             </div>
-                          )}
-                          <div className="ml-4">
-                            <div className="text-sm font-medium">{asset.name}</div>
-                            <div className="flex items-center mt-1">
-                              <span className="px-2 inline-flex text-xs leading-5 font-semibold rounded-full bg-green-900 text-green-200">
-                                {asset.network === 'Base Sepolia' ? 'Base Sepolia' : asset.network}
-                              </span>
-                            </div>
-                          </div>
-                        </div>
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        {parseFloat(asset.formattedBalance) < 0.000001 && parseFloat(asset.formattedBalance) > 0
-                          ? '< 0.000001'
-                          : asset.formattedBalance} {asset.symbol}
-                      </td>
-                      <td className="px-6 py-4 whitespace-nowrap text-sm">
-                        ${parseFloat(asset.valueUSD) < 0.01 ? '< 0.01' : parseFloat(asset.valueUSD).toFixed(2)}
-                      </td>
-                    </tr>
-                  ))
-                ) : isRefreshing ? (
-                  <tr>
-                    <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
-                      <div className="flex justify-center mb-4">
-                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-violet-500"></div>
-                      </div>
-                      <p>Loading assets...</p>
-                    </td>
-                  </tr>
-                ) : (
-                  <tr>
-                    <td colSpan={3} className="px-6 py-8 text-center text-gray-400">
-                      No assets found for this wallet
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-        </div>
+                            <p>Loading assets...</p>
+                          </td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </table>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
       </div>
       
       {/* Debug section - only for development */}
@@ -268,6 +312,7 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
           <p><span className="text-gray-400">Network:</span> Base Sepolia (Chain ID: 84532)</p>
           <p><span className="text-gray-400">Asset Count:</span> {assets.length}</p>
           <p><span className="text-gray-400">API Response:</span> {isRefreshing ? 'Loading...' : 'Complete'}</p>
+          <p><span className="text-gray-400">Wallet Ready:</span> {isWalletReady ? 'Yes' : 'No'}</p>
           {networkInfo && (
             <div>
               <p className="text-gray-400 mb-1">Network Info:</p>

@@ -4,17 +4,17 @@ import { type Address } from 'viem';
 import { 
   findUserById, 
   createSmartAccountFromCredential,
-  getOrCreateDKGKeysForUser,
-  generateRandomPrivateKey
+  getOrCreateDKGKeysForUser
 } from '@/lib/utils/user-store';
-import { supabase } from '@/lib/supabase/client';
+import { generateRandomPrivateKey, generateDistributedKeys, encryptPrivateKey } from '@/lib/utils/key-encryption';
+import { supabase } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
     console.log('API: Wallet creation endpoint called');
     
     const body = await request.json();
-    const { userId, deviceKey, forceCreate = false, createNewWallet = false, randomSalt } = body;
+    const { userId, deviceKey, forceCreate = false, createNewWallet = false, randomSalt, useExistingCredential = false } = body;
     
     if (!userId) {
       return NextResponse.json({ 
@@ -23,7 +23,7 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    console.log(`API: Creating wallet for user ${userId}. Force create: ${forceCreate}, Create new wallet: ${createNewWallet}`);
+    console.log(`API: Creating wallet for user ${userId}. Force create: ${forceCreate}, Create new wallet: ${createNewWallet}, Use existing credential: ${useExistingCredential}`);
     
     // Get user from Supabase
     const user = await findUserById(userId);
@@ -45,25 +45,42 @@ export async function POST(request: NextRequest) {
         isExistingWallet: true
       });
     }
-    
-    // Check for device key - critical for DKG
-    if (!deviceKey) {
-      console.warn('Missing device key in wallet creation request');
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Device key is required for DKG wallet creation. You must update your client to the latest version.',
-        needsDeviceKey: true
-      }, { status: 400 });
-    }
-    
-    // Generate or get existing DKG keys
-    console.log('API: Getting or creating DKG keys');
-    const { recoveryKey, isNew } = await getOrCreateDKGKeysForUser(userId, deviceKey);
-    
-    if (isNew) {
-      console.log('API: Created new DKG keys for user');
+
+    let keys;
+    if (useExistingCredential) {
+      // If using existing credential, generate new DKG keys
+      console.log('API: Using existing WebAuthn credential for DKG');
+      const { deviceKey, serverKey, recoveryKey } = generateDistributedKeys();
+      
+      // Store the server key
+      const serverKeyEncrypted = encryptPrivateKey(serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+      const { error: updateError } = await supabase
+        .from('users')
+        .update({
+          server_key_encrypted: serverKeyEncrypted
+        })
+        .eq('id', userId);
+        
+      if (updateError) {
+        console.error('API: Error storing server key:', updateError);
+        throw new Error('Failed to store server key');
+      }
+      
+      keys = { deviceKey, serverKey, recoveryKey, isNew: true };
     } else {
-      console.log('API: Using existing DKG keys for user');
+      // Check for device key - critical for DKG
+      if (!deviceKey) {
+        console.warn('Missing device key in wallet creation request');
+        return NextResponse.json({ 
+          success: false, 
+          error: 'Device key is required for DKG wallet creation. You must update your client to the latest version.',
+          needsDeviceKey: true
+        }, { status: 400 });
+      }
+      
+      // Generate or get existing DKG keys
+      console.log('API: Getting or creating DKG keys');
+      keys = await getOrCreateDKGKeysForUser(userId, deviceKey);
     }
     
     // If we're creating a new wallet with existing keys, 
@@ -86,8 +103,8 @@ export async function POST(request: NextRequest) {
       console.log(`API: Creating smart account for user ${userId}`);
       const result = await createSmartAccountFromCredential(
         userId, 
-        deviceKey,
-        'biometric', 
+        keys.deviceKey,
+        'biometric',
         forceCreate || createNewWallet,
         saltNonce
       );
@@ -122,7 +139,7 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({
         success: true,
         walletAddress: result.address,
-        recoveryKey: isNew ? recoveryKey : undefined,
+        recoveryKey: keys.isNew ? keys.recoveryKey : undefined,
         isExistingWallet: isExistingWallet || false,
         message: isExistingWallet 
           ? 'Existing wallet found' 
@@ -139,7 +156,7 @@ export async function POST(request: NextRequest) {
     console.error('API: Wallet creation error:', error);
     return NextResponse.json({ 
       success: false, 
-      error: error instanceof Error ? error.message : 'Unknown error creating wallet' 
+      error: error instanceof Error ? error.message : String(error)
     }, { status: 500 });
   }
 }

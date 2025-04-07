@@ -4,7 +4,7 @@ import { findAuthenticatorByCredentialId, findUserById, getWalletsForUser } from
 import { rpID, origin } from '@/lib/utils/user-store';
 import { setSessionCookie } from '@/lib/utils/auth-utils';
 import type { AuthenticationResponseJSON } from '@simplewebauthn/typescript-types';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {

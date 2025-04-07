@@ -1,4 +1,4 @@
-import { randomBytes, createCipheriv, createDecipheriv, createHash, scrypt, scryptSync } from 'crypto';
+import { randomBytes, createCipheriv, createDecipheriv, createHash, scrypt, scryptSync, pbkdf2Sync } from 'crypto';
 import { type Hex } from 'viem';
 import { EncryptedKey } from '../types/credentials';
 
@@ -9,8 +9,8 @@ const SERVER_KEY_SALT = process.env.SERVER_KEY_SALT || 'server-key-salt-change-i
 
 // Generate a random private key
 export function generateRandomPrivateKey(): Hex {
-  const privateKey = `0x${randomBytes(32).toString('hex')}`;
-  return privateKey as Hex;
+  const privateKey = randomBytes(32);
+  return `0x${privateKey.toString('hex')}` as Hex;
 }
 
 // Encrypt data with AES-GCM
@@ -148,13 +148,31 @@ export function generateDistributedKeys(): {
   };
 }
 
-// Create a deterministic key from combining device and server keys
+/**
+ * Securely combines device key and server key using PBKDF2
+ */
 export function combineKeys(deviceKey: Hex, serverKey: Hex): Hex {
-  const combinedKey = `0x${createHash('sha256')
-    .update(deviceKey.slice(2) + serverKey.slice(2))
-    .digest('hex')}`;
+  if (!deviceKey || !deviceKey.startsWith('0x') || deviceKey.length !== 66) {
+    throw new Error('Invalid device key format');
+  }
+  if (!serverKey || !serverKey.startsWith('0x') || serverKey.length !== 66) {
+    throw new Error('Invalid server key format');
+  }
+
+  // Remove '0x' prefix and convert to Buffer
+  const deviceKeyBuffer = Buffer.from(deviceKey.slice(2), 'hex');
+  const serverKeyBuffer = Buffer.from(serverKey.slice(2), 'hex');
   
-  return combinedKey as Hex;
+  // Use PBKDF2 for secure key derivation
+  const derivedKey = pbkdf2Sync(
+    deviceKeyBuffer,      // password
+    serverKeyBuffer,      // salt
+    100000,              // iterations
+    32,                  // key length
+    'sha256'             // digest
+  );
+  
+  return `0x${derivedKey.toString('hex')}` as Hex;
 }
 
 // Create a hash of a recovery key for verification
@@ -162,4 +180,92 @@ export function hashRecoveryKey(recoveryKey: Hex): string {
   return createHash('sha256')
     .update(recoveryKey.slice(2)) // Remove '0x' prefix
     .digest('hex');
+}
+
+/**
+ * Encrypts a private key using AES-256-GCM
+ */
+export function encryptPrivateKey(privateKey: Hex, encryptionKey: string): string {
+  if (!encryptionKey) {
+    throw new Error('Encryption key is required');
+  }
+  if (!privateKey || !privateKey.startsWith('0x') || privateKey.length !== 66) {
+    throw new Error('Invalid private key format');
+  }
+
+  const iv = randomBytes(12);
+  const key = createHash('sha256').update(encryptionKey).digest();
+  const cipher = createCipheriv('aes-256-gcm', key, iv);
+  
+  const privateKeyBuffer = Buffer.from(privateKey.slice(2), 'hex');
+  const encrypted = Buffer.concat([
+    cipher.update(privateKeyBuffer),
+    cipher.final()
+  ]);
+  
+  const authTag = cipher.getAuthTag();
+  
+  // Combine IV, encrypted data, and auth tag
+  const combined = Buffer.concat([iv, encrypted, authTag]);
+  return combined.toString('base64');
+}
+
+/**
+ * Decrypts an encrypted private key using AES-256-GCM
+ */
+export function decryptPrivateKey(encryptedKey: string, encryptionKey: string): Hex {
+  if (!encryptionKey) {
+    throw new Error('Encryption key is required');
+  }
+  if (!encryptedKey) {
+    throw new Error('Encrypted key is required');
+  }
+
+  try {
+    const combined = Buffer.from(encryptedKey, 'base64');
+    const iv = combined.slice(0, 12);
+    const authTag = combined.slice(-16);
+    const encrypted = combined.slice(12, -16);
+    
+    const key = createHash('sha256').update(encryptionKey).digest();
+    const decipher = createDecipheriv('aes-256-gcm', key, iv);
+    decipher.setAuthTag(authTag);
+    
+    const decrypted = Buffer.concat([
+      decipher.update(encrypted),
+      decipher.final()
+    ]);
+    
+    const privateKey = `0x${decrypted.toString('hex')}` as Hex;
+    if (privateKey.length !== 66) {
+      throw new Error('Decrypted key has invalid length');
+    }
+    return privateKey;
+  } catch (error: unknown) {
+    const errorMessage = error instanceof Error ? error.message : 'Unknown error';
+    throw new Error(`Failed to decrypt private key: ${errorMessage}`);
+  }
+}
+
+/**
+ * Validates that KEY_ENCRYPTION_KEY is set and has sufficient entropy
+ */
+export function validateKeyEncryptionKey(): void {
+  const key = process.env.KEY_ENCRYPTION_KEY;
+  if (!key) {
+    throw new Error('KEY_ENCRYPTION_KEY environment variable is not set');
+  }
+  if (key.length < 32) {
+    throw new Error('KEY_ENCRYPTION_KEY must be at least 32 characters long');
+  }
+  
+  // Check that the key contains a mix of characters for sufficient entropy
+  const hasUpperCase = /[A-Z]/.test(key);
+  const hasLowerCase = /[a-z]/.test(key);
+  const hasNumbers = /[0-9]/.test(key);
+  const hasSpecial = /[^A-Za-z0-9]/.test(key);
+  
+  if (!(hasUpperCase && hasLowerCase && hasNumbers && hasSpecial)) {
+    throw new Error('KEY_ENCRYPTION_KEY must contain a mix of uppercase, lowercase, numbers, and special characters');
+  }
 } 

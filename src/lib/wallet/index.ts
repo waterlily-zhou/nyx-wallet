@@ -5,7 +5,7 @@ import { createHash } from 'crypto';
 import { ClientSetup, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
 import { generateRandomPrivateKey, encryptServerKey } from '@/lib/utils/key-encryption';
 import { EncryptedKey } from '@/lib/types/credentials';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 export type WalletCreationParams = {
   method: 'biometric';

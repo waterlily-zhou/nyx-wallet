@@ -8,7 +8,6 @@ import CryptoJS from 'crypto-js';
 import { ethers } from 'ethers';
 import { generateAuthenticationOptions, generateRegistrationOptions, verifyAuthenticationResponse, verifyRegistrationResponse } from '@simplewebauthn/server';
 import crypto from 'crypto';
-// Remove file system imports
 import { encryptData, decryptData, generateRandomPrivateKey, generateDistributedKeys, combineKeys as keyCombine, encryptServerKey, decryptServerKey } from './key-encryption';
 import { Authenticator, EncryptedKey, AuthenticatorDevice, Wallet } from '../types/credentials';
 import { withRetry } from './retry-utils';
@@ -19,14 +18,13 @@ import { toSafeSmartAccount } from 'permissionless/accounts';
 // Import Supabase client
 import { supabase } from '../supabase/client';
 import { entropyToMnemonic } from '@scure/bip39';
+// Import wordlist
+import { wordlist } from '@scure/bip39/wordlists/english';
 
 // Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
-export const rpID = process.env.RP_ID || 'localhost';
-// Use a less strict origin expectation for development, supporting multiple ports
-export const origin = process.env.NODE_ENV === 'production' 
-  ? `https://${rpID}` 
-  : `http://${rpID}`;
+export const rpID = process.env.NODE_ENV === 'development' ? 'localhost' : process.env.RP_ID || 'localhost';
+export const origin = process.env.NODE_ENV === 'development' ? 'http://localhost:3000' : process.env.ORIGIN || 'http://localhost:3000';
 
 // Types
 export interface UserAccount {
@@ -179,98 +177,10 @@ export async function createSmartAccountFromCredential(
     
     return {
       ...result,
-      exists: false // This is a newly created account
-    };
-  } catch (error) {
-    console.error('Error creating smart account from credential:', error);
-    const errorDetails = error instanceof Error ? error : new Error(String(error));
-    
-    console.error('API: SCA creation error details:', JSON.stringify({
-      message: errorDetails.message,
-      stack: errorDetails.stack,
-      type: 'smart_account_creation_error'
-    }));
-    
-    throw errorDetails;
-  }
-}
-
-// Integrated DKG key handling and wallet creation
-async function createKeysForDKG(
-  userId: string,
-  serverKeyEncrypted: string,
-  biometricKeyEncrypted: string,
-  saltNonce?: bigint
-): Promise<{
-  address: Address;
-  exists: boolean;
-  smartAccount?: any;
-  smartAccountClient?: any;
-  publicClient?: any;
-  pimlicoClient?: any;
-  owner?: any;
-}> {
-  try {
-    console.log('Creating keys for Distributed Key Generation (DKG)');
-    
-    // Decrypt the server key
-    let serverKey: Hex;
-    try {
-      serverKey = decryptPrivateKey(serverKeyEncrypted, process.env.KEY_ENCRYPTION_KEY || '');
-      console.log('Successfully decrypted server key');
-    } catch (error) {
-      console.error('Error decrypting server key:', error);
-      throw new Error(`Failed to decrypt server key: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    
-    // Decrypt the biometric key
-    let biometricKey: Hex;
-    try {
-      biometricKey = decryptPrivateKey(biometricKeyEncrypted, userId);
-      console.log('Successfully decrypted biometric key');
-    } catch (error) {
-      console.error('Error decrypting biometric key:', error);
-      throw new Error(`Failed to decrypt biometric key: ${error instanceof Error ? error.message : String(error)}`);
-    }
-    
-    // Combine the keys using DKG
-    const combinedKey = combineKeys(biometricKey, serverKey);
-    console.log('Successfully combined keys');
-    
-    // Create the owner account from the combined key
-    const owner = privateKeyToAccount(combinedKey);
-    console.log(`Created owner account with address: ${owner.address}`);
-    
-    // Create the smart account using Permissionless.js
-    const result = await createPermissionlessSCA(userId, owner, saltNonce);
-    
-    // Store the wallet in Supabase
-    const { error: walletError } = await supabase
-      .from('wallets')
-      .insert({
-        id: crypto.randomUUID(),
-        user_id: userId,
-        address: result.address as string,
-        name: 'DKG Wallet created on ' + new Date().toLocaleDateString(),
-        chain_id: 11155111, // Sepolia
-        is_default: true,
-        created_at: new Date().toISOString(),
-        salt_nonce: saltNonce?.toString()
-      });
-      
-    if (walletError) {
-      console.error('Failed to store wallet in Supabase:', walletError);
-      throw new Error(`Failed to store wallet in Supabase: ${walletError.message}`);
-    }
-    
-    console.log(`Stored new wallet ${result.address} in Supabase`);
-    
-    return {
-      ...result,
       exists: false
     };
   } catch (error) {
-    console.error('Error in DKG key creation:', error);
+    console.error('Error in smart account creation:', error);
     throw error;
   }
 }
@@ -330,87 +240,15 @@ async function createPermissionlessSCA(
     const smartAccount = await toSafeSmartAccount(safeParams);
     console.log(`Created Smart Account with address: ${smartAccount.address}`);
     
-    // Create Pimlico client for paymaster functionality
-    const pimlicoApiKey = process.env.PIMLICO_API_KEY;
-    if (!pimlicoApiKey) {
-      throw new Error('Pimlico API key is required');
-    }
-    
-    // Create bundler URL with our API key
-    const bundlerUrl = `https://api.pimlico.io/v2/sepolia/rpc?apikey=${pimlicoApiKey}`;
-    
-    // Try multiple RPC endpoints if needed
-    const pimlicoClient = await withRetry(
-      async () => {
-        return createPimlicoClient({
-          transport: http(bundlerUrl),
-          entryPoint: {
-            address: ENTRY_POINT_ADDRESS,
-            version: "0.6" as const,
-          },
-        });
-      },
-      {
-        maxRetries: 3,
-        initialDelay: 1000
-      }
-    );
-    
-    // Create the smart account client with retries
-    const smartAccountClient = await withRetry(
-      async () => {
-        // Use any type to bypass TypeScript errors due to library version differences
-        const clientConfig: any = {
-          account: smartAccount,
-          chain: sepolia,
-          bundlerTransport: http(bundlerUrl),
-          middleware: {
-            sponsorUserOperation: async (args: any) => {
-              try {
-                if (!pimlicoClient.sponsorUserOperation) {
-                  throw new Error('Pimlico client not properly initialized');
-                }
-                
-                // Also use any for the sponsorUserOperation parameters
-                const sponsorParams: any = {
-                  userOperation: args.userOperation,
-                  entryPoint: ENTRY_POINT_ADDRESS,
-                };
-                
-                return await pimlicoClient.sponsorUserOperation(sponsorParams);
-              } catch (err) {
-                console.error('Sponsorship error:', err);
-                throw err;
-              }
-            }
-          }
-        };
-        
-        return createSmartAccountClient(clientConfig);
-      },
-      {
-        maxRetries: 3,
-        initialDelay: 1000
-      }
-    );
-    
-    console.log('Created Smart Account Client');
-    
-    // Call updateUserFn to maintain backwards compatibility
-    await updateUserWalletAddress(userId, smartAccount.address, safeParams.saltNonce);
-    
-    // Return the smart account info
     return {
       address: smartAccount.address,
       smartAccount,
-      smartAccountClient,
       publicClient,
-      pimlicoClient,
       owner
     };
   } catch (error) {
-    console.error('Failed to create permissionless Smart Contract Account:', error);
-    throw new Error(`Failed to create Smart Contract Account: ${error instanceof Error ? error.message : String(error)}`);
+    console.error('Error creating permissionless SCA:', error);
+    throw error;
   }
 }
 
@@ -451,15 +289,14 @@ export async function findUserById(userId: string): Promise<UserAccount | null> 
     
     if (error) {
       console.error('Supabase error finding user:', error.message);
-      
-      // Only in development, create a test user
-      if (process.env.NODE_ENV !== 'production') {
-        console.log(`Creating mock user for development with ID: ${userId}`);
-        return await createTestUser(userId);
-      }
-      
       return null;
     }
+
+    console.log('Raw Supabase user data:', {
+      id: data.id,
+      server_key_encrypted: data.server_key_encrypted ? 'exists' : 'missing',
+      auth_type: data.auth_type
+    });
     
     // Get the user's wallets
     const { data: wallets, error: walletsError } = await supabase
@@ -488,6 +325,12 @@ export async function findUserById(userId: string): Promise<UserAccount | null> 
         saltNonce: wallet.salt_nonce
       })) || []
     };
+
+    console.log('Converted UserAccount data:', {
+      id: user.id,
+      serverKey: user.serverKey ? 'exists' : 'missing',
+      authType: user.authType
+    });
     
     // Set walletAddress to the default wallet for backward compatibility
     const defaultWallet = user.wallets.find(w => w.isDefault);
@@ -498,46 +341,6 @@ export async function findUserById(userId: string): Promise<UserAccount | null> 
     return user;
   } catch (error) {
     console.error('Error finding user by ID:', error);
-    return null;
-  }
-}
-
-// Create a test user for development - using Supabase
-async function createTestUser(userId: string): Promise<UserAccount | null> {
-  try {
-    // Default private key for testing (hardhat #0)
-    const defaultPrivateKey = '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
-    
-    // Create the user in Supabase
-    const { data, error } = await supabase
-      .from('users')
-      .insert({
-        id: userId,
-        username: `test_${userId.substring(0, 5)}`,
-        auth_type: 'biometric',
-        created_at: new Date().toISOString(),
-        server_key_encrypted: encryptPrivateKey(defaultPrivateKey, userId),
-        is_active: true
-      })
-      .select()
-      .single();
-    
-    if (error) {
-      console.error('Error creating test user in Supabase:', error);
-      return null;
-    }
-    
-    // Return the created user
-    return {
-      id: data.id,
-      username: data.username,
-      authType: data.auth_type,
-      createdAt: new Date(data.created_at).getTime(),
-      serverKey: data.server_key_encrypted,
-      wallets: []
-    };
-  } catch (error) {
-    console.error('Error creating test user:', error);
     return null;
   }
 }
@@ -652,7 +455,7 @@ export async function createUser(data: Partial<UserAccount> & { id: string }): P
       id: data.id,
       username: data.username,
       created_at: new Date().toISOString(),
-      authType: data.authType || 'biometric',
+      auth_type: data.authType || 'biometric',
       is_active: true
     });
 
@@ -660,7 +463,11 @@ export async function createUser(data: Partial<UserAccount> & { id: string }): P
     throw new Error(`Failed to create user: ${error.message}`);
   }
 
-  return await findUserById(data.id);
+  const user = await findUserById(data.id);
+  if (!user) {
+    throw new Error('Failed to retrieve created user');
+  }
+  return user;
 }
 
 // Get wallets for a user - using Supabase
@@ -704,7 +511,7 @@ export async function storeKeys(
     const { error } = await supabase
       .from('users')
       .update({
-        server_key_encrypted: encryptPrivateKey(deviceKey, userId),
+        server_key_encrypted: encryptPrivateKey(serverKey, process.env.KEY_ENCRYPTION_KEY || ''),
         recovery_key_hash: hashRecoveryKey(recoveryKey)
       })
       .eq('id', userId);
@@ -798,8 +605,8 @@ export async function updateUser(updatedUser: Partial<UserAccount> & { id: strin
       .from('users')
       .update({
         username: updatedUser.username,
-        auth_type: updatedUser.authType || updatedUser.auth_type,
-        server_key_encrypted: updatedUser.serverKey || updatedUser.server_key_encrypted,
+        auth_type: updatedUser.authType,
+        server_key_encrypted: updatedUser.serverKey,
         recovery_key_hash: updatedUser.recoveryKeyHash,
         is_active: updatedUser.is_active
       })
@@ -961,9 +768,20 @@ export async function getDKGKeysForUser(userId: string, deviceKey: Hex): Promise
       throw new Error(`User ${userId} not found`);
     }
     
+    console.log('User data in getDKGKeysForUser:', {
+      id: user.id,
+      hasServerKey: user.server_key_encrypted ? 'yes' : 'no',
+      serverKeyType: user.server_key_encrypted ? typeof user.server_key_encrypted : 'undefined'
+    });
+    
     // Get server key from Supabase
     const serverKeyEncrypted = user.server_key_encrypted;
     if (!serverKeyEncrypted) {
+      console.error('Server key is missing. User data:', {
+        id: user.id,
+        serverKey: user.serverKey,
+        server_key_encrypted: user.server_key_encrypted
+      });
       throw new Error(`No server key found for user ${userId}`);
     }
     
@@ -1040,8 +858,10 @@ export async function getOrCreateDKGKeysForUser(
 function generateRecoveryKey(): string {
   // Generate a random mnemonic (12 words)
   const entropy = randomBytes(16);
-  const wordlist = null; // Use default wordlist
-  return entropyToMnemonic(entropy.toString('hex'), wordlist);
+  // Convert entropy to Uint8Array for entropyToMnemonic
+  const entropyArray = new Uint8Array(entropy);
+  // Use English wordlist
+  return entropyToMnemonic(entropyArray, wordlist);
 }
 
 // Hash the recovery key for safe storage

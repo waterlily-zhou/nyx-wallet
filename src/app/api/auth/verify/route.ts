@@ -125,8 +125,16 @@ export async function POST(request: NextRequest) {
       console.log('WebAuthn credential format looks valid');
       
       // WebAuthn verification success - Try to find the user by wallet address
-      const user = walletAddress ? findUserByWalletAddress(walletAddress as Address) : undefined;
-      const userId = user ? user.id : 'test_user'; // Fallback to test_user if not found
+      const user = walletAddress ? await findUserByWalletAddress(walletAddress as Address) : undefined;
+      
+      // If no user found, return 404
+      if (!user) {
+        console.log('API: No user found for wallet address:', walletAddress);
+        return NextResponse.json({ 
+          success: false, 
+          error: 'No user found. Please register first.'
+        }, { status: 404 });
+      }
 
       // Clear the challenge
       cookieStore.delete('auth_challenge');
@@ -141,8 +149,8 @@ export async function POST(request: NextRequest) {
         maxAge: 24 * 60 * 60, // 24 hours
       });
 
-      // Set userId cookie
-      cookieStore.set('userId', userId, {
+      // Set userId cookie with actual user ID
+      cookieStore.set('userId', user.id, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',
@@ -152,7 +160,7 @@ export async function POST(request: NextRequest) {
 
       return NextResponse.json({ 
         success: true, 
-        userId,
+        userId: user.id,
         message: 'Authentication successful'
       });
     } catch (verifyError) {

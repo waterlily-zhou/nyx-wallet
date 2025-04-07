@@ -11,10 +11,10 @@ const ERC20_ABI = parseAbi([
   'function name() view returns (string)'
 ]);
 
-// Well-known token addresses (on Sepolia testnet)
+// Well-known token addresses (on Base Sepolia testnet)
 const TOKEN_LIST = [
   {
-    address: '0x1c7D4B196Cb0C7B01d743Fbc6116a902379C7238', // USDC on Sepolia
+    address: '0x036CbD53842c5426634e7929541eC2318f3dCF7e', // USDC on Base Sepolia
     symbol: 'USDC',
     name: 'USD Coin',
     decimals: 6,
@@ -22,7 +22,7 @@ const TOKEN_LIST = [
     priceUSD: 1.0
   },
   {
-    address: '0x7AF17A48a6336F7dc1beF9D485139f7B6f4FB5F7', // DAI on Sepolia
+    address: '0x7c8dDa5e45f0f4E2Ee7e9eA784fAf9Ea68F2EE3', // DAI on Base Sepolia
     symbol: 'DAI',
     name: 'Dai Stablecoin',
     decimals: 18,

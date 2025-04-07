@@ -4,12 +4,16 @@ import { verifyRegistrationResponse } from '@simplewebauthn/server';
 import { rpID, origin, addAuthenticator, updateUser, createSmartAccountFromCredential } from '@/lib/utils/user-store';
 import { type Address } from 'viem';
 import { AuthenticatorDevice } from '@/lib/types/credentials';
-import { supabase } from '@/lib/supabase/client';
-import { encryptPrivateKey } from '@/lib/utils/user-store';
+import { supabase } from '@/lib/supabase/server';
+import { encryptPrivateKey, validateKeyEncryptionKey } from '@/lib/utils/key-encryption';
+import { createHash } from 'crypto';
 
 export async function POST(request: NextRequest) {
   try {
     console.log('API: Registration completion endpoint called');
+    
+    // Validate KEY_ENCRYPTION_KEY is set and has sufficient entropy
+    validateKeyEncryptionKey();
     
     // Get verification data
     const body = await request.json();
@@ -36,8 +40,21 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    // Parse the keys
-    const keys = JSON.parse(keysStr);
+    // Parse and validate the keys
+    let keys;
+    try {
+      keys = JSON.parse(keysStr);
+      if (!keys.deviceKey || !keys.serverKey || !keys.recoveryKey) {
+        throw new Error('Missing required keys');
+      }
+    } catch (error) {
+      console.error('API: Invalid keys format:', error);
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Invalid keys format' 
+      }, { status: 400 });
+    }
+    
     const { deviceKey, serverKey, recoveryKey } = keys;
     
     console.log(`API: Completing registration for user ${userId}`);
@@ -68,8 +85,8 @@ export async function POST(request: NextRequest) {
       // Verify the credential with WebAuthn - using actual origin from credential
       const verification = await verifyRegistrationResponse({
         response: credential,
-        expectedChallenge: challengeBase64, // Use the challenge directly as stored
-        expectedOrigin: actualOrigin, // Use the ACTUAL origin from the credential
+        expectedChallenge: challengeBase64,
+        expectedOrigin: actualOrigin,
         expectedRPID: rpID,
       });
       
@@ -85,23 +102,21 @@ export async function POST(request: NextRequest) {
         throw new Error('Missing registration info');
       }
       
-      // Extract the correct properties from verification.registrationInfo
-      // These property names are different depending on the library version
-      const registrationInfo = verification.registrationInfo;
-      
       // Extract credential ID directly from the credential object since structure may vary
       const credentialID = credential.id;
       const credentialRawId = credential.rawId;
-      // Default counter to 0 since it might not exist in the registrationInfo
       const counter = 0;
       
       try {
-        // Store the user's keys in Supabase
+        // Store the user's keys in Supabase with proper encryption
+        const encryptedServerKey = encryptPrivateKey(serverKey, process.env.KEY_ENCRYPTION_KEY || '');
+        const recoveryKeyHash = createHash('sha256').update(recoveryKey).digest('hex');
+        
         const { error: userUpdateError } = await supabase
           .from('users')
           .update({
-            server_key_encrypted: encryptPrivateKey(deviceKey, userId),
-            recovery_key_hash: recoveryKey // Store the recovery key hash
+            server_key_encrypted: encryptedServerKey,
+            recovery_key_hash: recoveryKeyHash
           })
           .eq('id', userId);
 
@@ -114,8 +129,12 @@ export async function POST(request: NextRequest) {
         
         // Create smart account from the credential using DKG
         console.log('API: Creating smart account...');
-        // Pass forceCreate=true since this is explicitly a wallet creation flow
-        const { address } = await createSmartAccountFromCredential(userId, 'biometric', true);
+        const { address } = await createSmartAccountFromCredential(
+          userId,
+          deviceKey,
+          'biometric',
+          true
+        );
         console.log(`API: Smart account created with address: ${address}`);
         
         // Store authenticator in Supabase
@@ -196,9 +215,9 @@ export async function POST(request: NextRequest) {
     }
   } catch (error) {
     console.error('API: Registration completion error:', error);
-    return NextResponse.json(
-      { success: false, error: error instanceof Error ? error.message : 'Failed to complete registration' },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      success: false,
+      error: error instanceof Error ? error.message : 'Registration completion failed'
+    }, { status: 500 });
   }
 } 

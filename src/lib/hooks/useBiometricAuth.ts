@@ -1,11 +1,13 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { Hex } from 'viem';
 
 interface AuthenticationResult {
   success: boolean;
   userId?: string;
   error?: string;
+  deviceKey?: Hex;
 }
 
 export function useBiometricAuth() {
@@ -117,7 +119,8 @@ export function useBiometricAuth() {
       if (result.success) {
         return { 
           success: true, 
-          userId: result.userId || 'test_user'  // Use the userId from the server or fallback to test_user
+          userId: result.userId,
+          deviceKey: result.deviceKey as Hex
         };
       } else {
         return { 

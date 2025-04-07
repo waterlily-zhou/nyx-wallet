@@ -4,7 +4,7 @@ import { randomBytes } from 'crypto';
 import { generateRegistrationOptions } from '@simplewebauthn/server';
 import { rpName, rpID, origin } from '@/lib/utils/user-store';
 import { generateDistributedKeys } from '@/lib/utils/key-encryption';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -96,7 +96,7 @@ export async function POST(request: NextRequest) {
     const userIdBuffer = new TextEncoder().encode(userId);
     
     try {
-      // Generate WebAuthn registration options - letting the library generate a challenge
+      // Generate WebAuthn registration options
       const registrationOptions = await generateRegistrationOptions({
         rpName,
         rpID,
@@ -107,13 +107,12 @@ export async function POST(request: NextRequest) {
         authenticatorSelection: {
           userVerification: 'required',
           residentKey: 'required',
-          authenticatorAttachment: 'platform' // Use platform authenticator (TouchID/FaceID)
+          authenticatorAttachment: 'platform'
         }
       });
-      
-      // Store the exact challenge string - SimpleWebAuthn's internal format
-      const challengeString = registrationOptions.challenge;
-      console.log('API: Original raw challenge:', challengeString);
+
+      // Store the original challenge for verification later
+      const challengeString = Buffer.from(registrationOptions.challenge).toString('base64url');
       
       // Store registration data in cookies
       const cookieStore = cookies();
@@ -159,9 +158,25 @@ export async function POST(request: NextRequest) {
       
       console.log('API: Generated WebAuthn registration options successfully');
       
+      // Return the options in the format expected by @simplewebauthn/browser
       return NextResponse.json({
         success: true,
-        options: registrationOptions
+        options: {
+          rp: {
+            name: registrationOptions.rp.name,
+            id: registrationOptions.rp.id
+          },
+          user: {
+            id: Buffer.from(registrationOptions.user.id).toString('base64url'),
+            name: registrationOptions.user.name,
+            displayName: registrationOptions.user.displayName
+          },
+          challenge: challengeString,
+          pubKeyCredParams: registrationOptions.pubKeyCredParams,
+          timeout: registrationOptions.timeout,
+          attestation: registrationOptions.attestation,
+          authenticatorSelection: registrationOptions.authenticatorSelection
+        }
       });
     } catch (optionsError) {
       console.error('API: Error generating WebAuthn options:', optionsError);

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from 'next/server';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 // POST /api/auth/credentials/delete - Delete a credential
 export async function POST(request: NextRequest) {

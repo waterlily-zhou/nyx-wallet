@@ -1,31 +1,35 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import crypto from 'crypto';
-import { supabase } from '@/lib/supabase/client';
+import { supabase } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
     console.log('API: Challenge endpoint called');
+    console.log('API: Request URL:', request.url);
+    console.log('API: Request headers:', Object.fromEntries(request.headers.entries()));
     
     const cookieStore = cookies();
     const walletAddress = cookieStore.get('walletAddress')?.value;
+    console.log('API: Wallet address from cookie:', walletAddress);
     
     // Check if there are any authenticators in Supabase
     let hasAuthenticators = false;
     try {
+      console.log('API: Checking for authenticators in Supabase...');
       const { data, error } = await supabase
         .from('authenticators')
         .select('id')
         .limit(1);
       
       if (!error && data && data.length > 0) {
-        console.log('API: Found authenticators in Supabase');
+        console.log('API: Found authenticators in Supabase:', data);
         hasAuthenticators = true;
       } else {
-        console.log('API: No authenticators found in Supabase');
+        console.log('API: No authenticators found in Supabase. Error:', error);
       }
     } catch (e) {
-      console.log('API: Error checking for authenticators in Supabase', e);
+      console.log('API: Error checking for authenticators in Supabase:', e);
     }
     
     // Generate a random challenge
