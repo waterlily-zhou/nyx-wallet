@@ -18,21 +18,6 @@ export type WebAuthnResult = {
   userId?: string;
 };
 
-// Helper function to convert base64 to Uint8Array
-function base64ToUint8Array(base64String: string): Uint8Array {
-  const fixedBase64 = base64String
-    .replace(/-/g, '+')
-    .replace(/_/g, '/')
-    .padEnd(Math.ceil(base64String.length / 4) * 4, '=');
-  const binaryString = atob(fixedBase64);
-  const len = binaryString.length;
-  const bytes = new Uint8Array(len);
-  for (let i = 0; i < len; i++) {
-    bytes[i] = binaryString.charCodeAt(i);
-  }
-  return bytes;
-}
-
 /**
  * Advanced WebAuthn hook that properly uses the secure enclave
  * and doesn't rely on cookies for credential discovery
@@ -192,13 +177,24 @@ export function useAdvancedWebAuthn() {
         options = existingOptions;
       }
       
+      // Ensure challenge and user.id are strings
+      if (typeof options.challenge !== 'string') {
+        throw new Error('Challenge is not a string');
+      }
+      if (typeof options.user.id !== 'string') {
+        throw new Error('User ID is not a string');
+      }
+      console.log('Challenge:', options.challenge, typeof options.challenge);
+      console.log('User ID:', options.user.id, typeof options.user.id);
       // Format the options and trigger the WebAuthn registration process
       const credential = await startRegistration({
-        ...options,
-        challenge: base64ToUint8Array(options.challenge),
-        user: {
-          ...options.user,
-          id: base64ToUint8Array(options.user.id)
+        optionsJSON: {
+          ...options,
+          challenge: options.challenge,
+          user: {
+            ...options.user,
+            id: options.user.id
+          }
         }
       });
       
@@ -211,10 +207,12 @@ export function useAdvancedWebAuthn() {
       
       if (!verificationResponse.ok) {
         const error = await verificationResponse.json();
+        console.error('❌ Registration verification failed with server:', error);
         throw new Error(error.message || 'Registration verification failed');
       }
       
       const result = await verificationResponse.json();
+      console.log('✅ Registration verified with server, result:', result);
       
       // Add the new credential to our list
       setAvailableCredentials(prev => [...prev, credential.id]);

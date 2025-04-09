@@ -13,8 +13,9 @@ export async function POST(request: NextRequest) {
     console.log('API: Registration completion endpoint called');
     
     // Validate KEY_ENCRYPTION_KEY is set and has sufficient entropy
+    console.log('KEY_ENCRYPTION_KEY:', process.env.KEY_ENCRYPTION_KEY?.length);
     validateKeyEncryptionKey();
-    
+   
     // Get verification data
     const body = await request.json();
     console.log('API: Request body:', JSON.stringify(body).substring(0, 100) + '...');
@@ -44,6 +45,7 @@ export async function POST(request: NextRequest) {
     let keys;
     try {
       keys = JSON.parse(keysStr);
+      console.log('API: Parsing keys:', keys, keysStr);
       if (!keys.deviceKey || !keys.serverKey || !keys.recoveryKey) {
         throw new Error('Missing required keys');
       }
@@ -101,11 +103,19 @@ export async function POST(request: NextRequest) {
       if (!verification.registrationInfo) {
         throw new Error('Missing registration info');
       }
+
+      const {
+        credentialID,
+        credentialPublicKey,
+        counter
+      } = verification.registrationInfo;
       
-      // Extract credential ID directly from the credential object since structure may vary
+      const credentialIdStr = Buffer.from(credentialID).toString('base64url');
+      
+/*       // Extract credential ID directly from the credential object since structure may vary
       const credentialID = credential.id;
       const credentialRawId = credential.rawId;
-      const counter = 0;
+      const counter = 0; */
       
       try {
         // Store the user's keys in Supabase with proper encryption
@@ -125,27 +135,19 @@ export async function POST(request: NextRequest) {
           throw new Error('Failed to store encryption keys');
         }
 
-        console.log('API: Stored keys in Supabase');
+        console.log('🔐 Using Supabase service role client to insert authenticator...');
         
-        // Create smart account from the credential using DKG
-        console.log('API: Creating smart account...');
-        const { address } = await createSmartAccountFromCredential(
-          userId,
-          deviceKey,
-          'biometric',
-          true
-        );
-        console.log(`API: Smart account created with address: ${address}`);
-        
+        console.log('🔍 credentialID:', credentialID, typeof credentialID);
+      console.log('🔍 base64 credentialID:', Buffer.from(credentialID).toString('base64url'));
+
         // Store authenticator in Supabase
-        const authenticatorId = crypto.randomUUID();
         const { error: authError } = await supabase
           .from('authenticators')
           .insert({
-            id: authenticatorId,
+            id: crypto.randomUUID(),
             user_id: userId,
-            credential_id: credentialID,
-            credential_public_key: Buffer.from(credentialRawId), // Store as bytea
+            credential_id: credentialIdStr,
+            credential_public_key: credentialPublicKey, // Store as bytea
             counter: counter,
             device_name: deviceName || 'Default Device',
             created_at: new Date().toISOString(),
@@ -159,6 +161,17 @@ export async function POST(request: NextRequest) {
         }
         
         console.log('API: Authenticator stored in Supabase');
+
+        // Create smart account from the credential using DKG
+        console.log('API: Creating smart account...');
+        const { address } = await createSmartAccountFromCredential(
+          userId,
+          deviceKey,
+          'biometric',
+          true
+        );
+        console.log(`API: Smart account created with address: ${address}`);
+                
         
         // Clear registration cookies
         cookieStore.delete('register_challenge');
