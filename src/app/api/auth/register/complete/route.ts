@@ -83,6 +83,9 @@ export async function POST(request: NextRequest) {
     const credentialChallenge = credentialData.challenge;
     console.log('API: Challenge from client data JSON:', credentialChallenge);
     
+    // Log the credential object before verification
+    console.log('API: Credential object:', JSON.stringify(credential, null, 2));
+    
     try {
       // Verify the credential with WebAuthn - using actual origin from credential
       const verification = await verifyRegistrationResponse({
@@ -91,6 +94,7 @@ export async function POST(request: NextRequest) {
         expectedOrigin: actualOrigin,
         expectedRPID: rpID,
       });
+      
       
       if (!verification.verified) {
         console.error('API: WebAuthn verification failed');
@@ -104,11 +108,9 @@ export async function POST(request: NextRequest) {
         throw new Error('Missing registration info');
       }
 
-      const {
-        credentialID,
-        credentialPublicKey,
-        counter
-      } = verification.registrationInfo;
+      const credentialID = verification.registrationInfo.credential.id;
+      const credentialPublicKey = verification.registrationInfo.credential.publicKey;
+      const counter = verification.registrationInfo.credential.counter;
       
       const credentialIdStr = Buffer.from(credentialID).toString('base64url');
       
@@ -188,6 +190,14 @@ export async function POST(request: NextRequest) {
           maxAge: 24 * 60 * 60, // 24 hours
         });
         
+        cookieStore.set('userId', userId, {
+          httpOnly: true,
+          secure: process.env.NODE_ENV === 'production',
+          sameSite: 'strict',
+          path: '/',
+          maxAge: 24 * 60 * 60, // 24 hours
+        });
+        
         cookieStore.set('walletAddress', address, {
           httpOnly: true,
           secure: process.env.NODE_ENV === 'production',
@@ -201,7 +211,8 @@ export async function POST(request: NextRequest) {
           success: true,
           message: 'Registration successful',
           recoveryKey,
-          walletAddress: address
+          walletAddress: address,
+          userId: userId
         });
       } catch (scaError) {
         console.error('API: Error creating Smart Contract Account:', scaError);

@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'crypto';
 import { privateKeyToAccount } from 'viem/accounts';
 import { type Address, type Hex, type SignableMessage } from 'viem';
-import { findUserById, decryptPrivateKey } from '@/lib/utils/user-store';
+import { findUserById } from '@/lib/utils/user-store';
+import { decryptPrivateKey } from '@/lib/utils/key-encryption';
 import { EncryptedKey } from '@/lib/types/credentials';
 
 export function combineKeys(deviceKey: Hex, serverKey: Hex): Hex {
@@ -69,7 +70,7 @@ export function generateDistributedKeys(): {
   return { deviceKey, serverKey, recoveryKey };
 }
 
-export async function getCombinedKeys(userId: string): Promise<{
+/* export async function getCombinedKeys(userId: string): Promise<{
   deviceKey: Hex;
   serverKey: Hex;
   combinedKey: Hex;
@@ -86,4 +87,4 @@ export async function getCombinedKeys(userId: string): Promise<{
   const deviceKey = '0x0000000000000000000000000000000000000000000000000000000000000000' as Hex;
   const combinedKey = combineKeys(deviceKey, serverKey);
   return { deviceKey, serverKey, combinedKey };
-}
+} */

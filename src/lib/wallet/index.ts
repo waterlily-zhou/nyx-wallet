@@ -1,9 +1,9 @@
 import { Hex } from 'viem';
 import { privateKeyToAccount } from 'viem/accounts';
-import { findUserById, decryptPrivateKey, updateUser, encryptPrivateKey } from '@/lib/utils/user-store';
+import { findUserById, updateUser } from '@/lib/utils/user-store';
 import { createHash } from 'crypto';
 import { ClientSetup, createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
-import { generateRandomPrivateKey, encryptServerKey } from '@/lib/utils/key-encryption';
+import { generateRandomPrivateKey, encryptPrivateKey, decryptPrivateKey } from '@/lib/utils/key-encryption';
 import { EncryptedKey } from '@/lib/types/credentials';
 import { supabase } from '@/lib/supabase/server';
 

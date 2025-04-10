@@ -20,6 +20,7 @@ import { supabase } from '../supabase/client';
 import { entropyToMnemonic } from '@scure/bip39';
 // Import wordlist
 import { wordlist } from '@scure/bip39/wordlists/english';
+import { encryptPrivateKey, decryptPrivateKey } from './key-encryption';
 
 // Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
@@ -47,56 +48,6 @@ export interface DistributedKeys {
   deviceKey: Hex;
   serverKey: Hex;
   recoveryKey: Hex;
-}
-
-// Encrypt a private key with a password
-export function encryptPrivateKey(privateKey: Hex, password: string): string {
-  return CryptoJS.AES.encrypt(privateKey, password).toString();
-}
-
-// Decrypt a private key with a password
-export function decryptPrivateKey(encryptedKey: string, password: string): Hex {
-  try {
-    console.log('Decrypting private key...');
-    const bytes = CryptoJS.AES.decrypt(encryptedKey, password);
-    const decryptedString = bytes.toString(CryptoJS.enc.Utf8);
-    
-    // Validate the decrypted string
-    if (!decryptedString || decryptedString.length === 0) {
-      throw new Error('Decryption resulted in empty string');
-    }
-    
-    console.log('Decrypted key successfully. Format check...');
-    
-    // Format the key as a proper hex string if needed
-    let formattedKey = decryptedString;
-    if (!formattedKey.startsWith('0x')) {
-      formattedKey = `0x${formattedKey}`;
-      console.log('Added 0x prefix to key');
-    }
-    
-    // Check if it's a valid hex string (should only contain 0-9, a-f, A-F after 0x)
-    const hexRegex = /^0x[0-9a-fA-F]+$/;
-    if (!hexRegex.test(formattedKey)) {
-      console.error('Decrypted key is not a valid hex string:', formattedKey.substring(0, 6) + '...');
-      throw new Error('Decrypted key is not a valid hex string');
-    }
-    
-    // For a 32-byte private key, there should be 64 hex characters after 0x
-    if (formattedKey.length !== 66) {
-      console.warn(`Decrypted key has unusual length: ${formattedKey.length} chars (expected 66)`);
-    }
-    
-    return formattedKey as Hex;
-  } catch (error) {
-    console.error('Error decrypting private key:', error);
-    // Return a default key for development
-    if (process.env.NODE_ENV !== 'production') {
-      console.warn('Using hardcoded test private key for development');
-      return '0xac0974bec39a17e36ba4a6b4d238ff944bacb478cbed5efcae784d7bf4f2ff80' as Hex;
-    }
-    throw error;
-  }
 }
 
 // Function to combine keys for the DKG system
@@ -764,30 +715,25 @@ export async function getDKGKeysForUser(userId: string, deviceKey: Hex): Promise
     
     // Get user from Supabase
     const user = await findUserById(userId);
+    console.log('Fetched user data:', user);
     if (!user) {
       throw new Error(`User ${userId} not found`);
     }
     
-    console.log('User data in getDKGKeysForUser:', {
-      id: user.id,
-      hasServerKey: user.server_key_encrypted ? 'yes' : 'no',
-      serverKeyType: user.server_key_encrypted ? typeof user.server_key_encrypted : 'undefined'
-    });
-    
     // Get server key from Supabase
-    const serverKeyEncrypted = user.server_key_encrypted;
+    const serverKeyEncrypted = user.serverKey;
+    console.log('Server key encrypted:', serverKeyEncrypted);
     if (!serverKeyEncrypted) {
       console.error('Server key is missing. User data:', {
         id: user.id,
-        serverKey: user.serverKey,
-        server_key_encrypted: user.server_key_encrypted
+        serverKeyEncrypted: user.serverKey,
       });
       throw new Error(`No server key found for user ${userId}`);
     }
     
     // Decrypt server key
     const serverKey = decryptPrivateKey(serverKeyEncrypted, process.env.KEY_ENCRYPTION_KEY || '');
-    
+    console.log('Decrypted server key:', serverKey);
     // Note: We don't need to get the biometric key from Supabase anymore,
     // it's provided by the client from secure storage
     

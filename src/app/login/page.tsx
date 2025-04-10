@@ -161,8 +161,10 @@ export default function LoginPage() {
       setError(null);
       addDebugLog('Checking for existing credentials...');
       
+      
       const credentials = await discoverExistingCredentials();
 
+      //* Path 1: Authenticate with existing bio credentials -> wallet creation
       if (credentials.length > 0) {
         addDebugLog('Found existing credential, attempting authentication...');
         const authResult = await authenticate();
@@ -198,10 +200,11 @@ export default function LoginPage() {
           setError(authResult.error || 'Authentication failed');
         }
       } else {
+        //* Path 2: No credential found, create a new bio credential -> wallet creation
         addDebugLog('No existing credential found, starting registration...');
         const username = `user_${Date.now()}`;
         
-        // Call the registration endpoint directly first
+        //? Register the user & device
         const registrationResponse = await fetch('/api/auth/register', {
           method: 'POST',
           headers: {
@@ -209,7 +212,7 @@ export default function LoginPage() {
           },
           body: JSON.stringify({ 
             username,
-            deviceName: 'Default Device'
+            deviceName: 'Default Device',
           }),
         });
 
@@ -223,8 +226,17 @@ export default function LoginPage() {
 
         // Now use the advanced WebAuthn hook to complete registration
         const result = await register(username, 'Default Device', options);
+        console.log('Registration result:', result);
         
-        if (result.success && result.userId) {
+        if (result.success) {
+          // Extract userId from the registration result
+          const userId = result.userId;
+          if (!userId) {
+            console.error('Registration successful but no userId returned');
+            setError('Registration failed - missing user ID');
+            return;
+          }
+
           addDebugLog('Registration successful, creating wallet...');
           const response = await fetch('/api/wallet/create', {
             method: 'POST',
@@ -232,8 +244,9 @@ export default function LoginPage() {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              userId: result.userId,
-              useExistingCredential: true
+              userId: userId,
+              useExistingCredential: true,
+              credentialId: result.credential?.id
             }),
           });
 
@@ -251,8 +264,9 @@ export default function LoginPage() {
             router.push('/dashboard');
           }
         } else {
+          // Only treat it as an error if success is false
           console.error('Registration failed:', result.error);
-          setError(result.error || 'Registration failed');
+          setError(result.error || 'Registration failed - please try again');
         }
       }
     } catch (error) {

@@ -1,7 +1,8 @@
 import { createSafeSmartAccount, createSmartAccountClientWithPaymaster, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '@/lib/client-setup';
 import { privateKeyToAccount, type Account } from 'viem/accounts';
 import { Hex } from 'viem';
-import { findUserById, decryptPrivateKey, getDKGKeysForUser } from '@/lib/utils/user-store';
+import { findUserById, getDKGKeysForUser } from '@/lib/utils/user-store';
+import { decryptPrivateKey } from '@/lib/utils/key-encryption';
 import { createHash } from 'crypto';
 
 export async function createSafeAccountClient(signer: Account) {
