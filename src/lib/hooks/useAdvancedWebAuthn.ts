@@ -16,6 +16,8 @@ export type WebAuthnResult = {
   error?: string;
   credential?: WebAuthnCredential;
   userId?: string;
+  walletAddress?: string;
+  recoveryKey?: string;
 };
 
 /**
@@ -220,7 +222,9 @@ export function useAdvancedWebAuthn() {
       return {
         success: true,
         credential,
-        userId: result.userId
+        userId: result.userId,
+        walletAddress: result.walletAddress,
+        recoveryKey: result.recoveryKey
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Registration failed';

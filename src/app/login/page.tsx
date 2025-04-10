@@ -159,10 +159,10 @@ export default function LoginPage() {
     try {
       setIsLoading(true);
       setError(null);
-      addDebugLog('Checking for existing credentials...');
-      
+
       
       const credentials = await discoverExistingCredentials();
+      console.log('🔥Credentials:', credentials);
 
       //* Path 1: Authenticate with existing bio credentials -> wallet creation
       if (credentials.length > 0) {
@@ -183,17 +183,31 @@ export default function LoginPage() {
           });
 
           const data = await response.json();
+          console.log('Wallet creation response data:', data);
           if (!data.success) {
             throw new Error(data.error || 'Failed to create wallet');
           }
 
+          // Always log what we received
+          addDebugLog(`Wallet created with address: ${data.walletAddress}`);
+          addDebugLog(`Recovery key present: ${!!data.recoveryKey}`);
+          console.log('Recovery key from response:', data.recoveryKey);
+
           if (data.recoveryKey) {
+            addDebugLog('Showing recovery key UI');
             setRecoveryKey(data.recoveryKey);
             setWalletAddress(data.walletAddress);
             setShowRecoveryKey(true);
+          } else if (data.isExistingWallet) {
+            // Show options for existing wallet instead of redirecting
+            addDebugLog('Existing wallet found, showing options');
+            setExistingWalletAddress(data.walletAddress);
+            setAuthenticatedUserId(authResult.userId);
+            setShowExistingWalletOptions(true);
           } else {
-            addDebugLog('Wallet created successfully');
-            router.push('/dashboard');
+            // This case shouldn't happen - we should always have a recovery key for new wallets
+            console.error('No recovery key found for new wallet');
+            setError('Wallet created but recovery key is missing. Please contact support.');
           }
         } else {
           console.error('Authentication failed:', authResult.error);
@@ -237,6 +251,16 @@ export default function LoginPage() {
             return;
           }
 
+          // Check if we already got a wallet address from registration
+          if (result.walletAddress && result.recoveryKey) {
+            addDebugLog(`Registration successful with wallet address: ${result.walletAddress}`);
+            setRecoveryKey(result.recoveryKey);
+            setWalletAddress(result.walletAddress);
+            setShowRecoveryKey(true);
+            return;
+          }
+
+          // Only call wallet creation if we didn't get a wallet from registration
           addDebugLog('Registration successful, creating wallet...');
           const response = await fetch('/api/wallet/create', {
             method: 'POST',
@@ -251,17 +275,31 @@ export default function LoginPage() {
           });
 
           const data = await response.json();
+          console.log('Wallet creation response data:', data);
           if (!data.success) {
             throw new Error(data.error || 'Failed to create wallet');
           }
 
+          // Always log what we received
+          addDebugLog(`Wallet created with address: ${data.walletAddress}`);
+          addDebugLog(`Recovery key present: ${!!data.recoveryKey}`);
+          console.log('Recovery key from response:', data.recoveryKey);
+
           if (data.recoveryKey) {
+            addDebugLog('Showing recovery key UI');
             setRecoveryKey(data.recoveryKey);
             setWalletAddress(data.walletAddress);
             setShowRecoveryKey(true);
+          } else if (data.isExistingWallet) {
+            // Show options for existing wallet instead of redirecting
+            addDebugLog('Existing wallet found, showing options');
+            setExistingWalletAddress(data.walletAddress);
+            setAuthenticatedUserId(userId);
+            setShowExistingWalletOptions(true);
           } else {
-            addDebugLog('Wallet created successfully');
-            router.push('/dashboard');
+            // This case shouldn't happen - we should always have a recovery key for new wallets
+            console.error('No recovery key found for new wallet');
+            setError('Wallet created but recovery key is missing. Please contact support.');
           }
         } else {
           // Only treat it as an error if success is false

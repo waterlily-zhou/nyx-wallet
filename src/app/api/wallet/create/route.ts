@@ -38,6 +38,20 @@ export async function POST(request: NextRequest) {
     if (user.wallets.length > 0 && !forceCreate && !createNewWallet) {
       const defaultWallet = user.wallets.find(w => w.isDefault) || user.wallets[0];
       console.log(`API: User ${userId} already has a wallet: ${defaultWallet.address}`);
+      
+      // If using existing credential, we still need to generate and return a recovery key
+      if (useExistingCredential) {
+        console.log('API: Generating recovery key for existing wallet...');
+        const { recoveryKey } = generateDistributedKeys();
+        return NextResponse.json({ 
+          success: true, 
+          walletAddress: defaultWallet.address,
+          message: 'Existing wallet found',
+          isExistingWallet: true,
+          recoveryKey: recoveryKey // Include recovery key even for existing wallet
+        });
+      }
+      
       return NextResponse.json({ 
         success: true, 
         walletAddress: defaultWallet.address,
@@ -51,6 +65,7 @@ export async function POST(request: NextRequest) {
       // If using existing credential, generate new DKG keys
       console.log('API: Using existing WebAuthn credential for DKG');
       const { deviceKey, serverKey, recoveryKey } = generateDistributedKeys();
+      console.log('API: Generated DKG keys - recovery key available:', !!recoveryKey);
       
       // Store the server key
       const serverKeyEncrypted = encryptPrivateKey(serverKey, process.env.KEY_ENCRYPTION_KEY || '');
@@ -67,6 +82,7 @@ export async function POST(request: NextRequest) {
       }
       
       keys = { deviceKey, serverKey, recoveryKey, isNew: true };
+      console.log('API: Keys prepared for response, isNew:', keys.isNew);
     } else {
       // Check for device key - critical for DKG
       if (!deviceKey) {
@@ -115,6 +131,7 @@ export async function POST(request: NextRequest) {
       
       const isExistingWallet = result.exists === true;
       console.log(`API: Smart account ${isExistingWallet ? 'retrieved' : 'created'} with address ${result.address}`);
+      console.log('API: Preparing response - keys.isNew:', keys.isNew, 'recoveryKey present:', !!keys.recoveryKey);
       
       // Update session cookies
       const cookieStore = cookies();

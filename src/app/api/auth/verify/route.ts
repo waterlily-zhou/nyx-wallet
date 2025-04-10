@@ -125,7 +125,8 @@ export async function POST(request: NextRequest) {
       console.log('WebAuthn credential format looks valid');
       
       // WebAuthn verification success - Try to find the user by wallet address
-      const user = walletAddress ? await findUserByWalletAddress(walletAddress as Address) : undefined;
+      const user = await findUserByCredentialId(credential.id);
+      /*  const user = walletAddress ? await findUserByWalletAddress(walletAddress as Address) : undefined; */
       
       // If no user found, return 404
       if (!user) {
