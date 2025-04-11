@@ -34,7 +34,7 @@ export function useAdvancedWebAuthn() {
   /**
    * Discover existing credentials on the device without relying on cookies
    */
-  const discoverExistingCredentials = async (): Promise<string[]> => {
+  const discoverExistingCredentials = async (): Promise<any> => {
     try {
       setIsDiscovering(true);
       // Get the options for credential discovery
@@ -56,30 +56,32 @@ export function useAdvancedWebAuthn() {
           timeout: 60000
         }
       });
+
+      console.log('🔥 Credential in startAuthentication:', credential);
       
       if (!credential) {
         console.log('No credentials discovered');
         return [];
       }
       
-      // Send discovered credential to server to identify
+/*       // Send discovered credential to server to identify
       const identifyResponse = await fetch('/api/auth/verify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ credential })
-      });
+      }); */
       
-      if (!identifyResponse.ok) {
+      /* if (!identifyResponse.ok) {
         console.error('Failed to identify credential:', await identifyResponse.json());
         return [];
-      }
+      } */
       
-      const { userId } = await identifyResponse.json();
+/*       const { userId } = await identifyResponse.json();
       if (userId) {
         setAvailableCredentials([credential.id]);
         return [credential.id];
-      }
-      return [];
+      } */
+      return credential;
     } catch (error) {
       console.error('Error in credential discovery:', error);
       return [];
