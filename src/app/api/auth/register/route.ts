@@ -27,7 +27,7 @@ export async function POST(request: NextRequest) {
     const body = await request.json();
     console.log('API: Request body:', body);
     
-    const { username, deviceName, test } = body;
+    const { username, deviceName} = body;
     
     if (!username) {
       console.log('API: Username missing');
@@ -37,51 +37,11 @@ export async function POST(request: NextRequest) {
       }, { status: 400 });
     }
     
-    // Special case for test mode - don't create actual user or keys
-    if (test) {
-      console.log('API: Test mode requested, returning test options');
-      
-      // Generate WebAuthn registration options
-      try {
-        // Convert string ID to Uint8Array for SimpleWebAuthn
-        const testUserId = `test-${Date.now()}`;
-        const userIdBuffer = new TextEncoder().encode(testUserId);
-        
-        const registrationOptions = await generateRegistrationOptions({
-          rpName,
-          rpID,
-          userID: userIdBuffer,
-          userName: username,
-          userDisplayName: username,
-          attestationType: 'none',
-          authenticatorSelection: {
-            userVerification: 'required',
-            residentKey: 'required',
-            authenticatorAttachment: 'platform' // Use platform authenticator (TouchID/FaceID)
-          }
-        });
-        
-        console.log('API: Generated test WebAuthn registration options successfully');
-        
-        return NextResponse.json({
-          success: true,
-          options: registrationOptions,
-          testMode: true
-        });
-      } catch (optionsError) {
-        console.error('API: Error generating test WebAuthn options:', optionsError);
-        return NextResponse.json({ 
-          success: false, 
-          error: 'Failed to generate WebAuthn options' 
-        }, { status: 500 });
-      }
-    }
-    
     // Generate a unique user ID
     const newUserId = `user_${Date.now()}_${randomBytes(4).toString('hex')}`;
     console.log(`API: Generated new user ID: ${newUserId}`);
     
-    // Create user ONLY in Supabase - no file system
+    // Create user in Supabase
     const { data: userData, error: userError } = await supabase
       .from('users')
       .insert({

@@ -27,21 +27,81 @@ export async function POST(request: NextRequest) {
       throw new Error('No credentials provided');
     }
 
+    // Get the challenge from the clientDataJSON
+    const clientDataJSON = JSON.parse(Buffer.from(credentials.response.clientDataJSON, 'base64').toString());
+    const challenge = clientDataJSON.challenge;
+    
+    if (!challenge) {
+      throw new Error('No challenge found in credential');
+    }
+
     // Get all authenticators first to debug
     const { data: allAuthenticators, error: listError } = await supabase
       .from('authenticators')
-      .select('credential_id, id');
+      .select('credential_id, id, credential_public_key');
+      
+    console.log('🔍 All authenticators in database:', allAuthenticators);
+
+        // Decode both for comparison
+      const clientIdBytes = Buffer.from(credentials.rawId, 'base64url');
+      const dbIdBytes = Buffer.from(allAuthenticators[0].credential_id, 'base64url'); // take first for now
+
+      console.log('Byte comparison:', {
+        client: Array.from(clientIdBytes),
+        db: Array.from(dbIdBytes),
+        equal: clientIdBytes.equals(dbIdBytes),
+      });
+    // Convert the credential ID to base64url format to match what's in the database
+    const rawId = credentials.rawId;
+
+    console.log('🔍 rawId:', rawId);
+
+    let decodedRawId: Uint8Array;
+
+    if (typeof rawId === 'string') {
+      try {
+        decodedRawId = Buffer.from(rawId, 'base64url'); // 💡 this handles base64url correctly
+      } catch (e) {
+        console.warn('⚠️ Failed to decode rawId as base64url. Fallback logic needed.');
+        throw new Error('Invalid credential rawId format');
+      }
+    } else {
+      decodedRawId = new Uint8Array(rawId);
+    }
+
+    const credentialIdBase64 = Buffer.from(decodedRawId).toString('base64url')
+
+
+    console.log('🔄 Credential ID conversion:', {
+      original: {
+        id: credentials.id,
+        rawId: credentials.rawId
+      },
+      converted: credentialIdBase64
+    });
+
+    // Find the authenticator that matches this credential
+    const authenticator = allAuthenticators?.find(a => a.credential_id === credentialIdBase64);
+    
+    if (!authenticator) {
+      console.error('❌ No authenticator found for credential:', {
+        originalId: credentials.id,
+        convertedId: credentialIdBase64,
+        availableIds: allAuthenticators?.map(a => a.credential_id)
+      });
+      throw new Error('No authenticator found for this credential');
+    }
 
     // Verify the credential with WebAuthn
     const verification = await verifyAuthenticationResponse({
       response: credentials,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      expectedChallenge: credentials.response.clientDataJSON.challenge,
+      expectedChallenge: challenge,
       credential: {
-        id: credentials.id,
-        publicKey: credentials.response.authenticatorData.publicKey,
-        counter: credentials.response.authenticatorData.counter
+        id: authenticator.credential_id,
+        publicKey: authenticator.credential_public_key,
+        counter: 0 // We'll update this after verification
       }
     });
 
