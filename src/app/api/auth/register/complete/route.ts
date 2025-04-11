@@ -61,7 +61,7 @@ export async function POST(request: NextRequest) {
     
     console.log(`API: Completing registration for user ${userId}`);
     
-    // For demo purposes, we'll check for simulated credential, but instead of returning a mock
+ /*    // For demo purposes, we'll check for simulated credential, but instead of returning a mock
     // wallet, we'll throw an error to enforce real SCA creation
     if (credential.id === 'simulated-credential-id') {
       console.log('API: Rejecting simulated credential - real SCA required');
@@ -69,7 +69,7 @@ export async function POST(request: NextRequest) {
         success: false, 
         error: 'Simulated credentials are not allowed. Must use real biometric authentication.' 
       }, { status: 400 });
-    }
+    } */
     
     // Extract the origin from the credential to handle port changes
     const credentialDataJson = Buffer.from(credential.response.clientDataJSON, 'base64').toString();

@@ -10,6 +10,19 @@ export async function POST(request: NextRequest) {
   try {
     console.log('API: Registration endpoint called');
     
+    // Check if user is already logged in
+    const cookieStore = cookies();
+    const session = cookieStore.get('session')?.value;
+    const existingUserId = cookieStore.get('userId')?.value;
+    
+    if (session === 'authenticated' && existingUserId) {
+      console.log('API: User already logged in, preventing new registration');
+      return NextResponse.json({ 
+        success: false, 
+        error: 'Cannot register while logged in. Please log out first.' 
+      }, { status: 403 });
+    }
+    
     // Get username from request
     const body = await request.json();
     console.log('API: Request body:', body);
@@ -65,14 +78,14 @@ export async function POST(request: NextRequest) {
     }
     
     // Generate a unique user ID
-    const userId = `user_${Date.now()}_${randomBytes(4).toString('hex')}`;
-    console.log(`API: Generated new user ID: ${userId}`);
+    const newUserId = `user_${Date.now()}_${randomBytes(4).toString('hex')}`;
+    console.log(`API: Generated new user ID: ${newUserId}`);
     
     // Create user ONLY in Supabase - no file system
     const { data: userData, error: userError } = await supabase
       .from('users')
       .insert({
-        id: userId,
+        id: newUserId,
         username: username,
         created_at: new Date().toISOString()
       })
@@ -93,7 +106,7 @@ export async function POST(request: NextRequest) {
     console.log('API: Generated distributed keys');
     
     // Convert userId to Uint8Array for WebAuthn
-    const userIdBuffer = new TextEncoder().encode(userId);
+    const userIdBuffer = new TextEncoder().encode(newUserId);
     
     try {
       // Generate WebAuthn registration options
@@ -115,7 +128,6 @@ export async function POST(request: NextRequest) {
       const challengeString = Buffer.from(registrationOptions.challenge).toString('base64url');
       
       // Store registration data in cookies
-      const cookieStore = cookies();
       cookieStore.set('register_challenge', challengeString, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
@@ -124,7 +136,7 @@ export async function POST(request: NextRequest) {
         maxAge: 5 * 60, // 5 minutes
       });
       
-      cookieStore.set('register_user_id', userId, {
+      cookieStore.set('register_user_id', newUserId, {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',

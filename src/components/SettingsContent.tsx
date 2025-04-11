@@ -1,6 +1,7 @@
 'use client';
 
 import { useState } from 'react';
+import { useRouter } from 'next/navigation';
 
 interface SettingsContentProps {
   walletAddress: string;
@@ -11,6 +12,24 @@ export default function SettingsContent({ walletAddress }: SettingsContentProps)
   const [recoveryKey, setRecoveryKey] = useState<string | null>(null);
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const router = useRouter();
+
+  const handleLogout = async () => {
+    try {
+      const response = await fetch('/api/auth/logout', {
+        method: 'POST'
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to logout');
+      }
+
+      router.push('/login');
+    } catch (err) {
+      console.error('Logout error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to logout');
+    }
+  };
 
   const fetchRecoveryKey = async () => {
     try {
@@ -130,6 +149,15 @@ export default function SettingsContent({ walletAddress }: SettingsContentProps)
             </button>
           </div>
           <p className="text-gray-500 text-xs mt-1">Custom RPC configuration not available on testnet</p>
+        </div>
+
+        <div className="border-t border-gray-800 pt-6">
+          <button
+            onClick={handleLogout}
+            className="w-full py-3 px-4 bg-red-600 text-white rounded-lg hover:bg-red-700 focus:outline-none"
+          >
+            Logout
+          </button>
         </div>
       </div>
     </div>

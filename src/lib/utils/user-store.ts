@@ -322,17 +322,41 @@ export async function findUserByWalletAddress(address: Address): Promise<UserAcc
 // Find authenticator by credential ID - using Supabase
 export async function findAuthenticatorByCredentialId(credentialId: string): Promise<AuthenticatorDevice | undefined> {
   try {
+    // Log the incoming credential ID format
+    console.log('🔍 Finding authenticator for credential ID:', credentialId);
+    
+    // Convert the credential ID to base64url format if it's not already
+    let credentialIdBase64: string;
+    try {
+      // Check if the input is already base64url encoded
+      const decoded = Buffer.from(credentialId, 'base64url');
+      credentialIdBase64 = decoded.toString('base64url');
+      console.log('🔄 Credential ID was already in base64url format');
+    } catch {
+      // If not base64url, assume it's raw bytes and convert
+      credentialIdBase64 = Buffer.from(credentialId).toString('base64url');
+      console.log('🔄 Converted credential ID to base64url format:', credentialIdBase64);
+    }
+    
     // Find the authenticator in Supabase
+    console.log('🔍 Querying Supabase with credential_id:', credentialIdBase64);
     const { data, error } = await supabase
       .from('authenticators')
       .select('*')
-      .eq('credential_id', credentialId)
+      .eq('credential_id', credentialIdBase64)
       .single();
     
     if (error || !data) {
-      console.error('Error finding authenticator by credential ID:', error?.message || 'Authenticator not found');
+      console.error('❌ Error finding authenticator by credential ID:', error?.message || 'Authenticator not found');
+      console.log('📝 Debug info:', {
+        originalCredentialId: credentialId,
+        convertedCredentialId: credentialIdBase64,
+        error: error?.message
+      });
       return undefined;
     }
+    
+    console.log('✅ Found authenticator:', data.id);
     
     // Get the user's default wallet address
     const { data: walletData, error: walletError } = await supabase
@@ -344,9 +368,11 @@ export async function findAuthenticatorByCredentialId(credentialId: string): Pro
     
     // If no wallet found, return undefined
     if (walletError || !walletData) {
-      console.log('No wallet found for this authenticator, returning undefined');
+      console.log('❌ No wallet found for this authenticator, returning undefined');
       return undefined;
     }
+    
+    console.log('✅ Found wallet address:', walletData.address);
     
     // Convert from Supabase to AuthenticatorDevice
     return {
@@ -360,7 +386,7 @@ export async function findAuthenticatorByCredentialId(credentialId: string): Pro
       lastUsed: data.last_used ? new Date(data.last_used) : undefined
     };
   } catch (error) {
-    console.error('Error finding authenticator by credential ID:', error);
+    console.error('❌ Error finding authenticator by credential ID:', error);
     return undefined;
   }
 }
@@ -387,7 +413,7 @@ export async function updateAuthenticator(authenticator: AuthenticatorDevice): P
   }
 }
 
-// Update the wallet address for a user - compatible with createPermissionlessSCA
+/* // Update the wallet address for a user - compatible with createPermissionlessSCA
 export async function updateUserWalletAddress(userId: string, walletAddress: Address, saltNonce?: bigint): Promise<void> {
   try {
     // We don't need to do anything here as we insert the wallet directly in createSmartAccountFromCredential
@@ -396,7 +422,7 @@ export async function updateUserWalletAddress(userId: string, walletAddress: Add
     console.error('Error updating user wallet address:', error);
     throw error;
   }
-}
+} */
 
 // Create a new user in Supabase
 export async function createUser(data: Partial<UserAccount> & { id: string }): Promise<UserAccount> {
@@ -493,11 +519,30 @@ export async function addAuthenticator(authenticator: AuthenticatorDevice): Prom
       authenticator.createdAt = new Date();
     }
     
-    // Convert Buffer to bytea for Postgres
+    // Ensure credential ID is in base64url format
+    let credentialIdBase64: string;
+    try {
+      // Check if already base64url encoded
+      const decoded = Buffer.from(authenticator.credentialID, 'base64url');
+      credentialIdBase64 = decoded.toString('base64url');
+      console.log('🔄 Credential ID was already in base64url format');
+    } catch {
+      // If not base64url, convert it
+      credentialIdBase64 = Buffer.from(authenticator.credentialID).toString('base64url');
+      console.log('🔄 Converted credential ID to base64url format:', credentialIdBase64);
+    }
+    
+    // Convert Buffer to base64 for Postgres
     let credentialPublicKeyBase64 = null;
     if (authenticator.credentialPublicKey instanceof Buffer) {
       credentialPublicKeyBase64 = Buffer.from(authenticator.credentialPublicKey).toString('base64');
     }
+    
+    console.log('Adding authenticator:', {
+      id: authenticator.id,
+      credentialId: credentialIdBase64,
+      deviceName: authenticator.deviceName
+    });
     
     // Insert the authenticator into Supabase
     const { error } = await supabase
@@ -505,7 +550,7 @@ export async function addAuthenticator(authenticator: AuthenticatorDevice): Prom
       .insert({
         id: authenticator.id,
         user_id: await getUserIdForWalletAddress(authenticator.walletAddress),
-        credential_id: authenticator.credentialID,
+        credential_id: credentialIdBase64,
         credential_public_key: credentialPublicKeyBase64,
         counter: authenticator.counter,
         device_name: authenticator.deviceName || 'Unknown Device',
@@ -519,7 +564,7 @@ export async function addAuthenticator(authenticator: AuthenticatorDevice): Prom
       throw new Error(`Failed to add authenticator: ${error.message}`);
     }
     
-    console.log(`Added authenticator ${authenticator.id} for wallet ${authenticator.walletAddress}`);
+    console.log('Successfully added authenticator:', authenticator.id);
   } catch (error) {
     console.error('Error adding authenticator:', error);
     throw error;
@@ -813,4 +858,64 @@ function generateRecoveryKey(): string {
 // Hash the recovery key for safe storage
 function hashRecoveryKey(recoveryKey: string): string {
   return createHash('sha256').update(recoveryKey).digest('hex');
+}
+
+/**
+ * Find wallet address associated with a credential ID
+ */
+export async function findWalletAddressByCredentialId(credentialId: string): Promise<string | undefined> {
+  try {
+    // First find the user_id from authenticators table
+    const { data: authData, error: authError } = await supabase
+      .from('authenticators')
+      .select('user_id')
+      .eq('credential_id', credentialId)
+      .single();
+
+    if (authError || !authData) {
+      console.error('Error finding user by credential ID:', authError);
+      return undefined;
+    }
+
+    // Then find the default wallet for this user
+    const { data: walletData, error: walletError } = await supabase
+      .from('wallets')
+      .select('address')
+      .eq('user_id', authData.user_id)
+      .eq('is_default', true)
+      .single();
+
+    if (walletError || !walletData) {
+      console.error('Error finding wallet:', walletError);
+      return undefined;
+    }
+
+    return walletData.address;
+  } catch (error) {
+    console.error('Error in findWalletAddressByCredentialId:', error);
+    return undefined;
+  }
+}
+
+/**
+ * Find user ID associated with a credential ID
+ */
+export async function findUserIdByCredentialId(credentialId: string): Promise<string | undefined> {
+  try {
+    const { data, error } = await supabase
+      .from('authenticators')
+      .select('user_id')
+      .eq('credential_id', credentialId)
+      .single();
+
+    if (error || !data) {
+      console.error('Error finding user by credential ID:', error);
+      return undefined;
+    }
+
+    return data.user_id;
+  } catch (error) {
+    console.error('Error in findUserIdByCredentialId:', error);
+    return undefined;
+  }
 } 
