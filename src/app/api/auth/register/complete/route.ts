@@ -7,6 +7,7 @@ import { AuthenticatorDevice } from '@/lib/types/credentials';
 import { supabase } from '@/lib/supabase/server';
 import { encryptPrivateKey, validateKeyEncryptionKey } from '@/lib/utils/key-encryption';
 import { createHash } from 'crypto';
+import { verifyAuthenticationResponse } from '@simplewebauthn/server';
 
 export async function POST(request: NextRequest) {
   try {
@@ -61,16 +62,6 @@ export async function POST(request: NextRequest) {
     
     console.log(`API: Completing registration for user ${userId}`);
     
- /*    // For demo purposes, we'll check for simulated credential, but instead of returning a mock
-    // wallet, we'll throw an error to enforce real SCA creation
-    if (credential.id === 'simulated-credential-id') {
-      console.log('API: Rejecting simulated credential - real SCA required');
-      return NextResponse.json({ 
-        success: false, 
-        error: 'Simulated credentials are not allowed. Must use real biometric authentication.' 
-      }, { status: 400 });
-    } */
-    
     // Extract the origin from the credential to handle port changes
     const credentialDataJson = Buffer.from(credential.response.clientDataJSON, 'base64').toString();
     const credentialData = JSON.parse(credentialDataJson);
@@ -95,6 +86,7 @@ export async function POST(request: NextRequest) {
         expectedRPID: rpID,
       });
       
+      console.log('api/auth/register/complete: Verification result:', verification);
       
       if (!verification.verified) {
         console.error('API: WebAuthn verification failed');
@@ -114,10 +106,54 @@ export async function POST(request: NextRequest) {
       
       const credentialIdStr = Buffer.from(credentialID).toString('base64url');
       
-/*       // Extract credential ID directly from the credential object since structure may vary
-      const credentialID = credential.id;
-      const credentialRawId = credential.rawId;
-      const counter = 0; */
+      // Verify the credential with authentication to ensure IDs match
+      try {
+        const authVerification = await verifyAuthenticationResponse({
+          response: {
+            id: credential.id,
+            rawId: credential.rawId,
+            response: credential.response,
+            type: credential.type,
+            clientExtensionResults: credential.clientExtensionResults || {}
+          },
+          expectedOrigin: actualOrigin,
+          expectedRPID: rpID,
+          expectedChallenge: challengeBase64,
+          credential: {
+            id: credentialID,
+            publicKey: credentialPublicKey,
+            counter: counter
+          }
+        });
+
+        if (!authVerification.verified) {
+          console.error('❌ Authentication verification failed after registration');
+          throw new Error('Authentication verification failed after registration');
+        }
+
+        const authCredentialId = authVerification.authenticationInfo.credentialID;
+        const authCredentialIdStr = Buffer.from(authCredentialId).toString('base64url');
+
+        console.log('🔍 Registration vs Authentication credential IDs:', {
+          registration: {
+            raw: credentialID,
+            base64url: credentialIdStr
+          },
+          authentication: {
+            raw: authCredentialId,
+            base64url: authCredentialIdStr
+          },
+          match: credentialIdStr === authCredentialIdStr
+        });
+
+        if (credentialIdStr !== authCredentialIdStr) {
+          console.error('❌ Credential ID mismatch between registration and authentication');
+          throw new Error('Credential ID mismatch between registration and authentication');
+        }
+      } catch (authError) {
+        console.error('❌ Error verifying credential with authentication:', authError);
+        throw new Error('Failed to verify credential with authentication');
+      }
       
       try {
         // Store the user's keys in Supabase with proper encryption

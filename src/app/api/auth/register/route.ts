@@ -16,7 +16,6 @@ export async function POST(request: NextRequest) {
     const existingUserId = cookieStore.get('userId')?.value;
     
     if (session === 'authenticated' && existingUserId) {
-      console.log('API: User already logged in, preventing new registration');
       return NextResponse.json({ 
         success: false, 
         error: 'Cannot register while logged in. Please log out first.' 

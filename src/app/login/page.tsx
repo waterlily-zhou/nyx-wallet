@@ -162,6 +162,7 @@ export default function LoginPage() {
       
       const credentials = await discoverExistingCredentials();
 
+      /* const credentials = await discoverExistingCredentials(); */
       //* Path 1: Found existing credential -> wallet creation
       if (credentials && credentials.id) {
         addDebugLog('Found existing credential, starting create wallet process...');
@@ -204,8 +205,18 @@ export default function LoginPage() {
           setError('Wallet created but recovery key is missing. Please contact support.');
         }
       } else {
+       // Add this check at the start of checkBiometricCredential()
+        const cookieStore = cookies();
+        const session = cookieStore.get('session')?.value;
+        const existingUserId = cookieStore.get('userId')?.value;
+
+        if (session === 'authenticated' && existingUserId) {
+          setError('Cannot register while logged in. Please log out first.');
+          return;
+        }
+        
         //* Path 2: No credential found, create a new bio credential -> wallet creation
-        addDebugLog('No existing credential found, starting registration...');
+        addDebugLog('Starting registration...');
         const username = `user_${Date.now()}`;
         
         //? Register the user & device

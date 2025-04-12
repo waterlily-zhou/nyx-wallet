@@ -42,66 +42,16 @@ export async function POST(request: NextRequest) {
       
     console.log('🔍 All authenticators in database:', allAuthenticators);
 
-        // Decode both for comparison
-      const clientIdBytes = Buffer.from(credentials.rawId, 'base64url');
-      const dbIdBytes = Buffer.from(allAuthenticators[0].credential_id, 'base64url'); // take first for now
-
-      console.log('Byte comparison:', {
-        client: Array.from(clientIdBytes),
-        db: Array.from(dbIdBytes),
-        equal: clientIdBytes.equals(dbIdBytes),
-      });
-    // Convert the credential ID to base64url format to match what's in the database
-    const rawId = credentials.rawId;
-
-    console.log('🔍 rawId:', rawId);
-
-    let decodedRawId: Uint8Array;
-
-    if (typeof rawId === 'string') {
-      try {
-        decodedRawId = Buffer.from(rawId, 'base64url'); // 💡 this handles base64url correctly
-      } catch (e) {
-        console.warn('⚠️ Failed to decode rawId as base64url. Fallback logic needed.');
-        throw new Error('Invalid credential rawId format');
-      }
-    } else {
-      decodedRawId = new Uint8Array(rawId);
-    }
-
-    const credentialIdBase64 = Buffer.from(decodedRawId).toString('base64url')
-
-
-    console.log('🔄 Credential ID conversion:', {
-      original: {
-        id: credentials.id,
-        rawId: credentials.rawId
-      },
-      converted: credentialIdBase64
-    });
-
-    // Find the authenticator that matches this credential
-    const authenticator = allAuthenticators?.find(a => a.credential_id === credentialIdBase64);
-    
-    if (!authenticator) {
-      console.error('❌ No authenticator found for credential:', {
-        originalId: credentials.id,
-        convertedId: credentialIdBase64,
-        availableIds: allAuthenticators?.map(a => a.credential_id)
-      });
-      throw new Error('No authenticator found for this credential');
-    }
-
-    // Verify the credential with WebAuthn
+    // First verify the credential with WebAuthn
     const verification = await verifyAuthenticationResponse({
       response: credentials,
       expectedOrigin: origin,
       expectedRPID: rpID,
       expectedChallenge: challenge,
       credential: {
-        id: authenticator.credential_id,
-        publicKey: authenticator.credential_public_key,
-        counter: 0 // We'll update this after verification
+        id: credentials.id,
+        publicKey: credentials.response.attestationObject,
+        counter: 0
       }
     });
 
@@ -109,37 +59,35 @@ export async function POST(request: NextRequest) {
       throw new Error('WebAuthn verification failed');
     }
 
-    // Get the raw credential ID from verification
-    const credentialID = verification.authenticationInfo.credentialID;
-    const credentialIdStr = Buffer.from(credentialID).toString('base64url');
+    // Get the verified credential ID from the verification result
+    const verifiedCredentialId = verification.authenticationInfo.credentialID;
+    const verifiedCredentialIdStr = Buffer.from(verifiedCredentialId).toString('base64url');
     
-    console.log('🔄 Credential info:', {
-      rawId: credentialID,
-      converted: credentialIdStr,
-      availableIds: allAuthenticators?.map(a => a.credential_id)
+    console.log('🔍 Verified credential info:', {
+      rawId: verifiedCredentialId,
+      base64url: verifiedCredentialIdStr,
+      originalId: credentials.id
     });
 
     // Find authenticator in Supabase using the verified credential ID
-    let { data: authenticatorData, error: authError } = await supabase
+    const { data: authenticator, error: authError } = await supabase
       .from('authenticators')
       .select('*')
-      .eq('credential_id', credentialIdStr)
+      .eq('credential_id', verifiedCredentialIdStr)
       .single();
 
-    console.log('Found authenticator in Supabase:', authenticatorData);
-
-    if (authError || !authenticatorData) {
-      console.error('Error finding authenticator:', authError?.message || 'No authenticator found');
-      console.log('Debug info:', {
-        originalCredentialId: credentials.id,
-        originalRawId: credentials.rawId,
-        convertedCredentialId: credentialIdStr,
+    if (authError || !authenticator) {
+      console.error('❌ No authenticator found for verified credential:', {
+        verifiedId: verifiedCredentialIdStr,
+        originalId: credentials.id,
         error: authError?.message
       });
       throw new Error('No authenticator found for this credential');
     }
 
-    const userId = authenticatorData.user_id;
+    console.log('✅ Found authenticator:', authenticator);
+
+    const userId = authenticator.user_id;
 
     // Check for existing wallet
     const walletAddress = await findWalletAddressByCredentialId(credentials.id);
