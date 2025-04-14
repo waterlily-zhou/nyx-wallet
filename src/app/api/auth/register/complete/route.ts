@@ -86,7 +86,7 @@ export async function POST(request: NextRequest) {
         expectedRPID: rpID,
       });
       
-      console.log('api/auth/register/complete: Verification result:', verification);
+      console.log('api/auth/register/complete: verifyRegistrationResponse:', verification);
       
       if (!verification.verified) {
         console.error('API: WebAuthn verification failed');
@@ -105,55 +105,9 @@ export async function POST(request: NextRequest) {
       const counter = verification.registrationInfo.credential.counter;
       
       const credentialIdStr = Buffer.from(credentialID).toString('base64url');
-      
-      // Verify the credential with authentication to ensure IDs match
-      try {
-        const authVerification = await verifyAuthenticationResponse({
-          response: {
-            id: credential.id,
-            rawId: credential.rawId,
-            response: credential.response,
-            type: credential.type,
-            clientExtensionResults: credential.clientExtensionResults || {}
-          },
-          expectedOrigin: actualOrigin,
-          expectedRPID: rpID,
-          expectedChallenge: challengeBase64,
-          credential: {
-            id: credentialID,
-            publicKey: credentialPublicKey,
-            counter: counter
-          }
-        });
 
-        if (!authVerification.verified) {
-          console.error('❌ Authentication verification failed after registration');
-          throw new Error('Authentication verification failed after registration');
-        }
-
-        const authCredentialId = authVerification.authenticationInfo.credentialID;
-        const authCredentialIdStr = Buffer.from(authCredentialId).toString('base64url');
-
-        console.log('🔍 Registration vs Authentication credential IDs:', {
-          registration: {
-            raw: credentialID,
-            base64url: credentialIdStr
-          },
-          authentication: {
-            raw: authCredentialId,
-            base64url: authCredentialIdStr
-          },
-          match: credentialIdStr === authCredentialIdStr
-        });
-
-        if (credentialIdStr !== authCredentialIdStr) {
-          console.error('❌ Credential ID mismatch between registration and authentication');
-          throw new Error('Credential ID mismatch between registration and authentication');
-        }
-      } catch (authError) {
-        console.error('❌ Error verifying credential with authentication:', authError);
-        throw new Error('Failed to verify credential with authentication');
-      }
+      console.log('api/auth/register/complete: credentialIdStr:', credentialIdStr);
+      console.log('api/auth/register/complete: credentialPublicKey:', credentialPublicKey);
       
       try {
         // Store the user's keys in Supabase with proper encryption

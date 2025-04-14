@@ -33,30 +33,23 @@ export async function GET(request: NextRequest) {
     }
     
     // Generate a random challenge
-    const randomBytes = crypto.randomBytes(32);
+    const challengeData = crypto.randomBytes(32);
+    const challengeBase64url = challengeData.toString('base64url');
     
-    // If we have a wallet address, include it in the challenge
-    let challengeData = randomBytes;
-    if (walletAddress) {
-      // Create a hash of the wallet address
-      const walletHash = crypto.createHash('sha256').update(walletAddress).digest();
-      
-      // Combine random bytes with wallet hash (first 16 bytes of each)
-      challengeData = Buffer.concat([
-        randomBytes.slice(0, 16),
-        walletHash.slice(0, 16)
-      ]);
-      
-      console.log(`API: Including wallet address ${walletAddress} in challenge`);
-    }
-    
-    // Convert to base64 string for the client
-    const challengeBase64 = challengeData.toString('base64');
-    
-    console.log('API: Generated challenge with length:', challengeBase64.length);
+    console.log('API: Generated challenge with length:', challengeBase64url.length);
+    console.log('🔍 Challenge Debug Info:');
+    console.log('  - Raw challenge:', challengeData.toString('hex'));
+    console.log('  - Base64URL challenge:', challengeBase64url);
+    console.log('  - Challenge Characters:', {
+      '+': (challengeBase64url.match(/\+/g) || []).length,
+      '/': (challengeBase64url.match(/\//g) || []).length,
+      '-': (challengeBase64url.match(/-/g) || []).length,
+      '_': (challengeBase64url.match(/_/g) || []).length,
+      '=': (challengeBase64url.match(/=/g) || []).length
+    });
     
     // Store the challenge and wallet address in cookies for verification
-    cookieStore.set('auth_challenge', challengeBase64, {
+    cookieStore.set('auth_challenge', challengeBase64url, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -74,7 +67,7 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      challenge: challengeBase64,
+      challenge: challengeBase64url,
       walletVerification: !!walletAddress || hasAuthenticators
     });
   } catch (error) {

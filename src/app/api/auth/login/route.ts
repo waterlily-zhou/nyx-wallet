@@ -49,11 +49,27 @@ export async function POST(request: NextRequest) {
       let verification;
       try {
         verification = await verifyAuthenticationResponse({
-          credential: credential as unknown as AuthenticationResponseJSON,
+          response: {
+            id: credential.id,
+            rawId: credential.rawId,
+            type: credential.type,
+            response: {
+              authenticatorData: credential.response.authenticatorData,
+              clientDataJSON: credential.response.clientDataJSON,
+              signature: credential.response.signature,
+              userHandle: credential.response.userHandle
+            },
+            clientExtensionResults: credential.clientExtensionResults || {}
+          },
           expectedChallenge,
           expectedOrigin: origin,
           expectedRPID: rpID,
-          requireUserVerification: true
+          requireUserVerification: true,
+          credential: {
+            id: authenticator.credentialID,
+            publicKey: authenticator.credentialPublicKey,
+            counter: authenticator.counter || 0
+          }
         });
       } catch (error) {
         console.error('Error verifying authentication response:', error);
@@ -112,7 +128,9 @@ export async function POST(request: NextRequest) {
       const options = await generateAuthenticationOptions({
         rpID,
         userVerification: 'required',
-        timeout: 60000
+        timeout: 60000,
+        // Don't specify allowCredentials to enable discoverable credentials
+        allowCredentials: []
       });
       
       // Return the options

@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { findUserById, findUserByWalletAddress } from '@/lib/utils/user-store';
+import { findUserByCredentialId, findUserByWalletAddress } from '@/lib/utils/user-store';
 import { type Address } from 'viem';
 import crypto from 'crypto';
 
@@ -107,18 +107,50 @@ export async function POST(request: NextRequest) {
         throw new Error('No challenge found in credential');
       }
       
-      // Convert the base64url-encoded challenge to base64 for comparison
-      const normalizedCredentialChallenge = credentialChallenge.replace(/-/g, '+').replace(/_/g, '/');
-      const base64StoredChallenge = storedChallenge.replace(/=/g, '');
+      // Log challenge formats for debugging
+      console.log('🔍 Challenge Debug Info:');
+      console.log('  - Credential Challenge:', credentialChallenge);
+      console.log('  - Stored Challenge:', storedChallenge);
+      console.log('  - Challenge Lengths:', {
+        credential: credentialChallenge.length,
+        stored: storedChallenge.length
+      });
+      console.log('  - Challenge Characters:', {
+        credential: {
+          '+': (credentialChallenge.match(/\+/g) || []).length,
+          '/': (credentialChallenge.match(/\//g) || []).length,
+          '-': (credentialChallenge.match(/-/g) || []).length,
+          '_': (credentialChallenge.match(/_/g) || []).length,
+          '=': (credentialChallenge.match(/=/g) || []).length
+        },
+        stored: {
+          '+': (storedChallenge.match(/\+/g) || []).length,
+          '/': (storedChallenge.match(/\//g) || []).length,
+          '-': (storedChallenge.match(/-/g) || []).length,
+          '_': (storedChallenge.match(/_/g) || []).length,
+          '=': (storedChallenge.match(/=/g) || []).length
+        }
+      });
       
-      if (normalizedCredentialChallenge !== base64StoredChallenge) {
-        console.log('API: Challenge mismatch');
-        console.log('API: Credential challenge:', normalizedCredentialChallenge);
-        console.log('API: Stored challenge:', base64StoredChallenge);
+      // The challenge from the credential is already in base64url format
+      // We just need to ensure the stored challenge is in the same format
+      const storedChallengeBase64url = storedChallenge.replace(/=/g, '');
+      
+      if (credentialChallenge !== storedChallengeBase64url) {
+        console.log('❌ Challenge mismatch');
+        console.log('  - Credential challenge:', credentialChallenge);
+        console.log('  - Stored challenge (base64url):', storedChallengeBase64url);
+        console.log('  - Challenge comparison:', {
+          length: credentialChallenge.length === storedChallengeBase64url.length,
+          characters: {
+            credential: credentialChallenge.split(''),
+            stored: storedChallengeBase64url.split('')
+          }
+        });
         throw new Error('Challenge mismatch');
       }
       
-      console.log('API: Challenge verified successfully');
+      console.log('✅ Challenge verified successfully');
       
       // In a real implementation, you'd verify the credential against stored authenticators
       // For now, consider the credential valid based on format

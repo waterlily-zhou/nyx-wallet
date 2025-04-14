@@ -325,32 +325,46 @@ export async function findAuthenticatorByCredentialId(credentialId: string): Pro
     // Log the incoming credential ID format
     console.log('🔍 Finding authenticator for credential ID:', credentialId);
     
-    // Convert the credential ID to base64url format if it's not already
-    let credentialIdBase64: string;
+    // Convert the credential ID to base64url format
+    let credentialIdBase64url: string;
     try {
-      // Check if the input is already base64url encoded
-      const decoded = Buffer.from(credentialId, 'base64url');
-      credentialIdBase64 = decoded.toString('base64url');
-      console.log('🔄 Credential ID was already in base64url format');
+      // First try to decode as base64
+      const decoded = Buffer.from(credentialId, 'base64');
+      credentialIdBase64url = decoded.toString('base64url');
+      console.log('🔄 Converted credential ID from base64 to base64url format');
     } catch {
-      // If not base64url, assume it's raw bytes and convert
-      credentialIdBase64 = Buffer.from(credentialId).toString('base64url');
-      console.log('🔄 Converted credential ID to base64url format:', credentialIdBase64);
+      try {
+        // If that fails, try base64url
+        const decoded = Buffer.from(credentialId, 'base64url');
+        credentialIdBase64url = decoded.toString('base64url');
+        console.log('🔄 Credential ID was already in base64url format');
+      } catch {
+        // If both fail, assume it's raw bytes
+        credentialIdBase64url = Buffer.from(credentialId).toString('base64url');
+        console.log('🔄 Converted credential ID from raw bytes to base64url format');
+      }
     }
     
+    // Log the conversion result
+    console.log('🔍 Credential ID conversion:', {
+      original: credentialId,
+      base64url: credentialIdBase64url,
+      length: credentialIdBase64url.length
+    });
+    
     // Find the authenticator in Supabase
-    console.log('🔍 Querying Supabase with credential_id:', credentialIdBase64);
+    console.log('🔍 Querying Supabase with credential_id:', credentialIdBase64url);
     const { data, error } = await supabase
       .from('authenticators')
       .select('*')
-      .eq('credential_id', credentialIdBase64)
+      .eq('credential_id', credentialIdBase64url)
       .single();
     
     if (error || !data) {
       console.error('❌ Error finding authenticator by credential ID:', error?.message || 'Authenticator not found');
       console.log('📝 Debug info:', {
         originalCredentialId: credentialId,
-        convertedCredentialId: credentialIdBase64,
+        convertedCredentialId: credentialIdBase64url,
         error: error?.message
       });
       return undefined;
@@ -900,22 +914,77 @@ export async function findWalletAddressByCredentialId(credentialId: string): Pro
 /**
  * Find user ID associated with a credential ID
  */
-export async function findUserIdByCredentialId(credentialId: string): Promise<string | undefined> {
+
+export async function findUserByCredentialId(credentialId: string) {
   try {
-    const { data, error } = await supabase
+    // Log the incoming credential ID format
+    console.log('🔍 Finding user for credential ID:', credentialId);
+    
+    // Convert the credential ID to base64url format
+    let credentialIdBase64url: string;
+    try {
+      // First try to decode as base64
+      const decoded = Buffer.from(credentialId, 'base64');
+      credentialIdBase64url = decoded.toString('base64url');
+      console.log('🔄 Converted credential ID from base64 to base64url format');
+    } catch {
+      try {
+        // If that fails, try base64url
+        const decoded = Buffer.from(credentialId, 'base64url');
+        credentialIdBase64url = decoded.toString('base64url');
+        console.log('🔄 Credential ID was already in base64url format');
+      } catch {
+        // If both fail, assume it's raw bytes
+        credentialIdBase64url = Buffer.from(credentialId).toString('base64url');
+        console.log('🔄 Converted credential ID from raw bytes to base64url format');
+      }
+    }
+    
+    // Log the conversion result
+    console.log('🔍 Credential ID conversion:', {
+      original: credentialId,
+      base64url: credentialIdBase64url,
+      length: credentialIdBase64url.length
+    });
+    
+    // First find the authenticator with this credential ID
+    const { data: authenticator, error: authError } = await supabase
       .from('authenticators')
       .select('user_id')
-      .eq('credential_id', credentialId)
+      .eq('credential_id', credentialIdBase64url)
       .single();
 
-    if (error || !data) {
-      console.error('Error finding user by credential ID:', error);
-      return undefined;
+    if (authError) {
+      console.error('❌ Error finding authenticator:', authError);
+      console.log('📝 Debug info:', {
+        originalCredentialId: credentialId,
+        convertedCredentialId: credentialIdBase64url,
+        error: authError.message
+      });
+      return null;
     }
 
-    return data.user_id;
+    if (!authenticator) {
+      console.log('❌ No authenticator found for credential ID:', credentialIdBase64url);
+      return null;
+    }
+
+    // Then find the user associated with this authenticator
+    const { data: user, error: userError } = await supabase
+      .from('users')
+      .select('*')
+      .eq('id', authenticator.user_id)
+      .single();
+
+    if (userError) {
+      console.error('❌ Error finding user:', userError);
+      return null;
+    }
+
+    console.log('✅ Found user:', user.id);
+    return user;
   } catch (error) {
-    console.error('Error in findUserIdByCredentialId:', error);
-    return undefined;
+    console.error('❌ Error in findUserByCredentialId:', error);
+    return null;
   }
 } 

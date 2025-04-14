@@ -9,7 +9,7 @@ import {
   createSmartAccountFromCredential,
   getOrCreateDKGKeysForUser,
   findWalletAddressByCredentialId,
-  findUserIdByCredentialId,
+  findUserByCredentialId,
   findAuthenticatorByCredentialId
 } from '@/lib/utils/user-store';
 import { generateRandomPrivateKey, generateDistributedKeys, encryptPrivateKey } from '@/lib/utils/key-encryption';
@@ -38,9 +38,46 @@ export async function POST(request: NextRequest) {
     // Get all authenticators first to debug
     const { data: allAuthenticators, error: listError } = await supabase
       .from('authenticators')
-      .select('credential_id, id, credential_public_key');
+      .select('credential_id, id, credential_public_key, user_id');
       
     console.log('🔍 All authenticators in database:', allAuthenticators);
+
+    // Log the credential we received from the browser
+    console.log('🔍 Browser credential:', {
+      id: credentials.id,
+      rawId: credentials.rawId,
+      type: credentials.type,
+      response: {
+        authenticatorData: credentials.response.authenticatorData,
+        clientDataJSON: credentials.response.clientDataJSON,
+        signature: credentials.response.signature
+      }
+    });
+
+    // Convert base64 to base64url by replacing characters directly
+    const credentialIdBase64url = credentials.id
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
+    console.log('🔍 Credential ID conversion:', {
+      original: credentials.id,
+      base64url: credentialIdBase64url
+    });
+
+    // Find the authenticator using the base64url credential ID
+    const foundAuthenticator = allAuthenticators?.find(a => a.credential_id === credentialIdBase64url);
+
+    if (!foundAuthenticator) {
+      console.error('❌ No authenticator found for credential:', {
+        originalId: credentials.id,
+        base64urlId: credentialIdBase64url,
+        availableIds: allAuthenticators?.map(a => a.credential_id)
+      });
+      throw new Error('No authenticator found for this credential');
+    }
+
+    console.log('✅ Found authenticator:', foundAuthenticator);
 
     // First verify the credential with WebAuthn
     const verification = await verifyAuthenticationResponse({
@@ -49,8 +86,8 @@ export async function POST(request: NextRequest) {
       expectedRPID: rpID,
       expectedChallenge: challenge,
       credential: {
-        id: credentials.id,
-        publicKey: credentials.response.attestationObject,
+        id: foundAuthenticator.credential_id,
+        publicKey: Buffer.from(foundAuthenticator.credential_public_key, 'base64'),
         counter: 0
       }
     });

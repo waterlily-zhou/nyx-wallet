@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
+import { cookies } from 'next/headers';
 import { useBiometricAuth } from '@/lib/hooks/useBiometricAuth';
 import { useAdvancedWebAuthn, type WebAuthnResult } from '@/lib/hooks/useAdvancedWebAuthn';
 import { generateAndStoreDeviceKey } from '@/lib/client/secure-storage';
@@ -160,10 +161,10 @@ export default function LoginPage() {
       setIsLoading(true);
       setError(null);
       
+      /* Commented out for now
       const credentials = await discoverExistingCredentials();
 
-      /* const credentials = await discoverExistingCredentials(); */
-      //* Path 1: Found existing credential -> wallet creation
+      // Path 1: Found existing credential -> wallet creation
       if (credentials && credentials.id) {
         addDebugLog('Found existing credential, starting create wallet process...');
 
@@ -205,12 +206,12 @@ export default function LoginPage() {
           setError('Wallet created but recovery key is missing. Please contact support.');
         }
       } else {
-       // Add this check at the start of checkBiometricCredential()
-        const cookieStore = cookies();
-        const session = cookieStore.get('session')?.value;
-        const existingUserId = cookieStore.get('userId')?.value;
-
-        if (session === 'authenticated' && existingUserId) {
+      */
+        // Check if user is already logged in
+        const sessionCookie = document.cookie.split('; ').find(row => row.startsWith('session='));
+        const userIdCookie = document.cookie.split('; ').find(row => row.startsWith('userId='));
+        
+        if (sessionCookie?.includes('authenticated') && userIdCookie) {
           setError('Cannot register while logged in. Please log out first.');
           return;
         }
@@ -307,16 +308,15 @@ export default function LoginPage() {
           console.error('Registration failed:', result.error);
           setError(result.error || 'Registration failed - please try again');
         }
+      } catch (error) {
+        console.error('Error in biometric check:', error);
+        const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
+        addDebugLog(`Error: ${errorMessage}`);
+        setError(errorMessage);
+      } finally {
+        setIsLoading(false);
       }
-    } catch (error) {
-      console.error('Error in biometric check:', error);
-      const errorMessage = error instanceof Error ? error.message : 'An unexpected error occurred';
-      addDebugLog(`Error: ${errorMessage}`);
-      setError(errorMessage);
-    } finally {
-      setIsLoading(false);
-    }
-  };
+    };
   
   const addExistingWallet = () => {
     setShowNoWalletMessage(false);
