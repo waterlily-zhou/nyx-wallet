@@ -27,12 +27,12 @@ export async function POST(request: NextRequest) {
       throw new Error('No credentials provided');
     }
 
-    // Get the challenge from the clientDataJSON
-    const clientDataJSON = JSON.parse(Buffer.from(credentials.response.clientDataJSON, 'base64').toString());
-    const challenge = clientDataJSON.challenge;
+    // Get the stored challenge from cookies
+    const cookieStore = cookies();
+    const storedChallenge = cookieStore.get('auth_challenge')?.value;
     
-    if (!challenge) {
-      throw new Error('No challenge found in credential');
+    if (!storedChallenge) {
+      throw new Error('No authentication challenge found. Please start the authentication flow again.');
     }
 
     // Get all authenticators first to debug
@@ -79,12 +79,12 @@ export async function POST(request: NextRequest) {
 
     console.log('✅ Found authenticator:', foundAuthenticator);
 
-    // First verify the credential with WebAuthn
+    // First verify the credential with WebAuthn using our stored challenge
     const verification = await verifyAuthenticationResponse({
       response: credentials,
       expectedOrigin: origin,
       expectedRPID: rpID,
-      expectedChallenge: challenge,
+      expectedChallenge: storedChallenge,
       credential: {
         id: foundAuthenticator.credential_id,
         publicKey: Buffer.from(foundAuthenticator.credential_public_key, 'base64'),
@@ -95,6 +95,9 @@ export async function POST(request: NextRequest) {
     if (!verification.verified) {
       throw new Error('WebAuthn verification failed');
     }
+
+    // Clear the challenge cookie after successful verification
+    cookieStore.delete('auth_challenge');
 
     // Get the verified credential ID from the verification result
     const verifiedCredentialId = verification.authenticationInfo.credentialID;

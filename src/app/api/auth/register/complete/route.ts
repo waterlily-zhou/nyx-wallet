@@ -100,12 +100,15 @@ export async function POST(request: NextRequest) {
         throw new Error('Missing registration info');
       }
 
-      const credentialID = verification.registrationInfo.credential.id;
+      const credentialID = verification.registrationInfo.credential.id; //* base64url
       const credentialPublicKey = verification.registrationInfo.credential.publicKey;
       const counter = verification.registrationInfo.credential.counter;
       
-      const credentialIdStr = Buffer.from(credentialID).toString('base64url');
+      const credentialIdStr = Buffer.isBuffer(credentialID)
+        ? Buffer.from(credentialID).toString('base64url')
+        : credentialID;
 
+      console.log('api/auth/register/complete: credentialID:', credentialID);
       console.log('api/auth/register/complete: credentialIdStr:', credentialIdStr);
       console.log('api/auth/register/complete: credentialPublicKey:', credentialPublicKey);
       
