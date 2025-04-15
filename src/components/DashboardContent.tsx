@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { parseEther, formatEther } from 'viem';
 import TransactionFlow from './TransactionFlow';
+import { createPublicClientForSepolia } from '@/lib/client-setup';
 
 interface Asset {
   type: 'native' | 'erc20';
@@ -40,33 +41,25 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const checkWalletStatus = async () => {
     try {
       setIsRefreshing(true);
-      const response = await fetch('/api/wallet/creation-status', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          userId: walletAddress // Using wallet address as userId for now
-        })
+      
+      // Create a client to check on-chain status
+      const publicClient = createPublicClientForSepolia();
+      
+      // Check if the wallet contract exists on-chain
+      const code = await publicClient.getBytecode({
+        address: walletAddress as `0x${string}`
       });
       
-      if (!response.ok) {
-        throw new Error('Failed to check wallet status');
-      }
+      // If code is null or '0x', the contract doesn't exist on-chain
+      const contractExists = code !== null && code !== '0x';
       
-      const data = await response.json();
-      if (data.success) {
-        if (data.isCreated) {
-          setIsWalletReady(true);
-          fetchTokenBalances(walletAddress);
-          fetchNetworkInfo();
-        } else if (data.isCreating) {
-          // Wallet is still being created, check again in 2 seconds
-          setTimeout(checkWalletStatus, 2000);
-        } else {
-          // Wallet not found or error
-          console.error('Wallet not found or error:', data.error);
-        }
+      if (contractExists) {
+        setIsWalletReady(true);
+        fetchTokenBalances(walletAddress);
+        fetchNetworkInfo();
+      } else {
+        // Wallet contract not deployed yet, check again in 2 seconds
+        setTimeout(checkWalletStatus, 2000);
       }
     } catch (err) {
       console.error('Error checking wallet status:', err);
@@ -203,13 +196,7 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
           )}
         </div>
         
-        {!isWalletReady ? (
-          <div className="flex flex-col items-center justify-center p-8 border border-violet-500 rounded-lg">
-            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-500 mb-4"></div>
-            <p className="text-violet-400">Creating your wallet...</p>
-            <p className="text-gray-400 text-sm mt-2">This may take a few moments</p>
-          </div>
-        ) : (
+        {isWalletReady &&(
           <>
             <div className="flex flex-row gap-16 rounded-lg p-6">
               <div className="mb-6">

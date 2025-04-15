@@ -160,6 +160,8 @@ export default function LoginPage() {
     try {
       setIsLoading(true);
       setError(null);
+      setIsRegistering(true);
+      setIsSigningIn(false);
       
       /* Commented out for now
       const credentials = await discoverExistingCredentials();
@@ -343,27 +345,28 @@ export default function LoginPage() {
   };
 
   // Success UI with recovery key
-  if (showRecoveryKey && recoveryKey) {
+  if (showRecoveryKey) {
     return (
-      <div className="w-full max-w-md p-4">
-        <div className="bg-yellow-900/30 border border-yellow-600 text-yellow-200 px-4 py-3 rounded-lg mb-4" role="alert">
-          <strong className="font-bold">Important!</strong>
-          <div className="bg-gray-900 p-4 rounded-lg text-center font-mono break-all text-gray-200">
-          {recoveryKey}
-         </div>
-          <p className="mt-1"> Save this recovery key securely. It will only be shown once.  If you lose access to your device, you'll need this key to recover your wallet.</p>
+      <div className="w-full max-w-md flex flex-col items-center justify-center p-4">
+        <div className="w-16 h-16 rounded-full bg-violet-500 flex items-center justify-center mb-4">
+          <svg className="w-10 h-10 text-black" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+            <path d="M22 6L9 17L4 12" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
+          </svg>
         </div>
-        
+        <p className="text-lg text-gray-100 mb-4">New wallet successfully created!</p>
         {walletAddress && (
-          <div className="mt-4">
-            <h3 className="text-sm font-medium text-gray-400">Wallet Address:</h3>
-            <div className="bg-gray-900 p-2 rounded-lg flex items-center justify-between text-sm text-gray-300">
-              <div className="font-mono break-all flex-1 mr-2 overflow-hidden text-ellipsis">
-                {walletAddress}
+          <div className="relative border border-violet-500 px-4 py-3 rounded-lg mt-4 mb-8">
+            <p className="absolute -top-2.5 left-2 text-sm text-violet-500 px-1 bg-black">
+              Wallet Address
+            </p>
+            <div className="p-2 rounded-lg flex items-center justify-between text-sm text-gray-100">
+              <div className="font-mono break-all flex-1 mr-2 overflow-hidden text-ellipsis flex items-center">
+                <div className="w-16 h-11 rounded-full bg-violet-500 mr-2"></div>
+                {walletAddress}0xB54386807C666eB1a0EBa45536aa3466e358B012
               </div>
               <div className="flex items-center space-x-2">
                 <button 
-                  onClick={() => copyToClipboard(walletAddress)}
+                  onClick={() => copyToClipboard(walletAddress || '')}
                   className="p-1.5 text-gray-400 hover:text-gray-200 bg-gray-800 rounded-md transition-colors"
                   title="Copy to clipboard"
                 >
@@ -385,17 +388,41 @@ export default function LoginPage() {
               </div>
             </div>
           </div>
-        )}
+       )}
+
+     {recoveryKey && ( 
+          <div className="relative border border-slate-700 px-4 py-4 rounded-lg mb-4" role="alert">
+           
+            <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
+              Recovery Key
+            </p>
+            <div className="flex items-center gap-4 text-sm text-gray-400 bg-slate-900 p-2 rounded-lg font-mono break-all text-gray-200 mb-2">
+              {recoveryKey}0xB54386807C666eB1a0EBa45536aa3466e358B012
+              <button 
+                  onClick={() => copyToClipboard(recoveryKey || '')}
+                  className="p-1.5 text-gray-400 hover:text-gray-200 bg-gray-800 rounded-md transition-colors"
+                  title="Copy to clipboard"
+                >
+                  <svg xmlns="http://www.w3.org/2000/svg" className="h-4 w-4" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M8 16H6a2 2 0 01-2-2V6a2 2 0 012-2h8a2 2 0 012 2v2m-6 12h8a2 2 0 002-2v-8a2 2 0 00-2-2h-8a2 2 0 00-2 2v8a2 2 0 002 2z" />
+                  </svg>
+                </button>
+            </div>
+            <p className="text-sm text-gray-400 mt-1">If you lose access to your device, you'll need this key to recover your wallet.</p>
+          </div>
+       )}
+
         
         <button
           onClick={handleContinueAfterRecovery}
           className="w-full mt-6 py-3 px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 focus:outline-none"
         >
-          I've saved my recovery key - Continue to Wallet
+          Continue to Wallet
+          <p className="text-xs text-gray-200">I've saved my recovery key </p>
         </button>
       </div>
     );
-  }
+}
 
   return (
     <div className="w-full max-w-md mx-auto my-auto">
@@ -405,147 +432,157 @@ export default function LoginPage() {
         </div>
       )}
       
-      {/* Show "no wallet" message when appropriate */}
-      {showNoWalletMessage && (
-        <div className="p-2 mb-4 bg-transparent border border-red-500 rounded-lg text-center">
-          <p className="text-red-300 text-sm">You have no wallet yet</p>
-        </div>
-      )}
-      
-      {showExistingWalletOptions && authenticatedUserId ? (
-        <div className="bg-gray-900 border border-violet-500 rounded-lg p-6">
-          <p className="mb-3 text-center">You have an existing wallet:</p>
-          
-          {existingWalletAddress && (
-            <div className="bg-gray-800 p-3 rounded-lg text-center mb-6 font-mono text-sm overflow-hidden">
-              {existingWalletAddress}
+      {isRegistering ? (
+          <div className="flex flex-col items-center justify-center p-8 border border-violet-500 rounded-lg">
+            <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-violet-500 mb-4"></div>
+            <p className="text-violet-400">Creating your wallet...</p>
+            <p className="text-gray-400 text-sm mt-2">This may take a few moments</p>
+          </div>
+      ) : (
+        <>
+          {/* Show "no wallet" message when appropriate */}
+          {showNoWalletMessage && (
+            <div className="p-2 mb-4 bg-transparent border border-red-500 rounded-lg text-center">
+              <p className="text-red-300 text-sm">You have no wallet yet</p>
             </div>
           )}
           
-          <div className="flex flex-col gap-4">
-            <button 
-              onClick={() => {
-                // Navigate directly to dashboard instead of showing creation handler
-                router.push('/');
-              }}
-              className="py-3 px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center justify-center"
-            >
-              Use This Wallet
-            </button>
-            
-            <div className="relative flex items-center my-2">
-              <div className="flex-grow border-t border-gray-600"></div>
-              <span className="flex-shrink mx-4 text-gray-400 text-sm">OR</span>
-              <div className="flex-grow border-t border-gray-600"></div>
+          {showExistingWalletOptions && authenticatedUserId ? (
+            <div className="bg-gray-900 border border-violet-500 rounded-lg p-6">
+              <p className="mb-3 text-center">You have an existing wallet:</p>
+              
+              {existingWalletAddress && (
+                <div className="bg-gray-800 p-3 rounded-lg text-center mb-6 font-mono text-sm overflow-hidden">
+                  {existingWalletAddress}
+                </div>
+              )}
+              
+              <div className="flex flex-col gap-4">
+                <button 
+                  onClick={() => {
+                    // Navigate directly to dashboard instead of showing creation handler
+                    router.push('/');
+                  }}
+                  className="py-3 px-4 bg-violet-600 text-white rounded-lg hover:bg-violet-700 flex items-center justify-center"
+                >
+                  Use This Wallet
+                </button>
+                
+                <div className="relative flex items-center my-2">
+                  <div className="flex-grow border-t border-gray-600"></div>
+                  <span className="flex-shrink mx-4 text-gray-400 text-sm">OR</span>
+                  <div className="flex-grow border-t border-gray-600"></div>
+                </div>
+                
+                <button 
+                  onClick={() => {
+                    // Create a new wallet with the same biometric credential
+                    setShowExistingWalletOptions(false);
+                    setCreateNewWallet(true);
+                    checkBiometricCredential();
+                  }}
+                  className="py-3 px-4 bg-black border border-violet-500 text-violet-500 rounded-lg hover:border-violet-600 flex items-center justify-center"
+                >
+                  <svg className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                    <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
+                  </svg>
+                  Create A New Wallet
+                </button>
+              </div>
             </div>
-            
-            <button 
-              onClick={() => {
-                // Create a new wallet with the same biometric credential
-                setShowExistingWalletOptions(false);
-                setCreateNewWallet(true);
-                checkBiometricCredential();
-              }}
-              className="py-3 px-4 bg-black border border-violet-500 text-violet-500 rounded-lg hover:border-violet-600 flex items-center justify-center"
-            >
-              <svg className="h-5 w-5 mr-2" viewBox="0 0 20 20" fill="currentColor">
-                <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
-              </svg>
-              Create A New Wallet
-            </button>
-          </div>
-        </div>
-      ) : (
-        <div className="grid gap-4">
-          <button 
-            onClick={handleBiometricAuth}
-            disabled={isSigningIn}
-            className="w-full bg-violet-500 text-gray-100 py-8 px-8 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:bg-violet-700 disabled:opacity-50"
-          >
-            {isSigningIn ? (
-              <svg className="animate-spin h-8 w-8 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              <svg 
-                className="h-8 w-8 mr-2"
-                viewBox="0 0 24 24" 
-                fill="none" 
-                stroke="currentColor" 
-                strokeWidth="1.5" 
-                strokeLinecap="round" 
-                strokeLinejoin="round"
+          ) : (
+            <div className="grid gap-4">
+              <button 
+                onClick={handleBiometricAuth}
+                disabled={isSigningIn}
+                className="w-full bg-violet-500 text-gray-100 py-8 px-8 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:bg-violet-700 disabled:opacity-50"
               >
-                {/* Top left, right, bottom left, bottom right corner */}
-                <path d="M7 3h-4v4" />
-                <path d="M17 3h4v4" />
-                <path d="M7 21h-4v-4" />
-                <path d="M17 21h4v-4" />
-                {/* Eyes */}
-                <circle cx="9" cy="9" r="0.6" />
-                <circle cx="15" cy="9" r="0.6" />
-                {/* Smile */}
-                <path d="M9 15c.83 1.5 5.17 1.5 6 0" />
-              </svg>
-            )}
-            <div className="flex flex-col ml-2">
-              <div>Sign in to your wallet</div>
-              <div className="text-xs mt-1 text-gray-200">(FaceID / fingerprint)</div>
-            </div>
-          </button>
-          
-          <button
-            onClick={addExistingWallet}
-            disabled={isSigningIn}
-            className="w-full bg-black border border-violet-500 text-violet-500 py-4 px-4 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:border-violet-700 disabled:opacity-50"
-          >
-            <svg className="h-8 w-8 mr-2" viewBox="0 0 20 20" fill="currentColor">
-              <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
-            </svg>
-            <div>Add an existing wallet</div>
-          </button>
-          
-          <button
-            onClick={checkBiometricCredential}
-            disabled={isSigningIn || webAuthnRegistering}
-            className="w-full bg-black border border-violet-500 text-violet-500 py-4 px-4 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:border-violet-700 disabled:opacity-50"
-          >
-            {webAuthnRegistering ? (
-              <svg className="animate-spin h-8 w-8 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
-                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
-                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
-              </svg>
-            ) : (
-              <>
-                <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mr-2">
-                  <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+                {isSigningIn ? (
+                  <svg className="animate-spin h-8 w-8 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <svg 
+                    className="h-8 w-8 mr-2"
+                    viewBox="0 0 24 24" 
+                    fill="none" 
+                    stroke="currentColor" 
+                    strokeWidth="1.5" 
+                    strokeLinecap="round" 
+                    strokeLinejoin="round"
+                  >
+                    {/* Top left, right, bottom left, bottom right corner */}
+                    <path d="M7 3h-4v4" />
+                    <path d="M17 3h4v4" />
+                    <path d="M7 21h-4v-4" />
+                    <path d="M17 21h4v-4" />
+                    {/* Eyes */}
+                    <circle cx="9" cy="9" r="0.6" />
+                    <circle cx="15" cy="9" r="0.6" />
+                    {/* Smile */}
+                    <path d="M9 15c.83 1.5 5.17 1.5 6 0" />
+                  </svg>
+                )}
+                <div className="flex flex-col ml-2">
+                  <div>Sign in to your wallet</div>
+                  <div className="text-xs mt-1 text-gray-200">(FaceID / fingerprint)</div>
+                </div>
+              </button>
+              
+              <button
+                onClick={addExistingWallet}
+                disabled={isSigningIn}
+                className="w-full bg-black border border-violet-500 text-violet-500 py-4 px-4 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:border-violet-700 disabled:opacity-50"
+              >
+                <svg className="h-8 w-8 mr-2" viewBox="0 0 20 20" fill="currentColor">
+                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-11a1 1 0 10-2 0v2H7a1 1 0 100 2h2v2a1 1 0 102 0v-2h2a1 1 0 100-2h-2V7z" clipRule="evenodd" />
                 </svg>
-                Create a new wallet
-              </>
-            )}
-          </button>
-        </div>
-      )}
-      
-      <div className="mt-4 text-center">
-        <button
-          onClick={() => setShowDebugger(!showDebugger)}
-          className="text-gray-600 border border-gray-300 px-3 py-1 rounded text-xs cursor-pointer hover:bg-gray-100"
-        >
-          {showDebugger ? 'Hide Debug Logs' : 'Show Debug Logs'}
-        </button>
-      </div>
-      
-      {showDebugger && (
-        <div className="mt-4 p-4 bg-gray-100 border border-gray-300 rounded-lg font-mono text-xs max-h-40 overflow-y-auto">
-          <div>
-            {debugLog.map((log, i) => (
-              <div key={i} className="mb-2 text-gray-700">{log}</div>
-            ))}
-            {debugLog.length === 0 && <div className="text-gray-500">No logs yet</div>}
+                <div>Add an existing wallet</div>
+              </button>
+              
+              <button
+                onClick={checkBiometricCredential}
+                disabled={isSigningIn || webAuthnRegistering}
+                className="w-full bg-black border border-violet-500 text-violet-500 py-4 px-4 rounded-lg flex flex-row items-center justify-center cursor-pointer hover:border-violet-700 disabled:opacity-50"
+              >
+                {webAuthnRegistering ? (
+                  <svg className="animate-spin h-8 w-8 mr-2" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                    <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                    <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                  </svg>
+                ) : (
+                  <>
+                    <svg xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor" className="w-8 h-8 mr-2">
+                      <path strokeLinecap="round" strokeLinejoin="round" d="M21 12a2.25 2.25 0 00-2.25-2.25H15a3 3 0 11-6 0H5.25A2.25 2.25 0 003 12m18 0v6a2.25 2.25 0 01-2.25 2.25H5.25A2.25 2.25 0 013 18v-6m18 0V9M3 12V9m18 0a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 9m18 0V6a2.25 2.25 0 00-2.25-2.25H5.25A2.25 2.25 0 003 6v3" />
+                    </svg>
+                    Create a new wallet
+                  </>
+                )}
+              </button>
+            </div>
+          )}
+
+          <div className="mt-4 text-center">
+            <button
+              onClick={() => setShowDebugger(!showDebugger)}
+              className="text-gray-600 border border-gray-300 px-3 py-1 rounded text-xs cursor-pointer hover:bg-gray-100"
+            >
+              {showDebugger ? 'Hide Debug Logs' : 'Show Debug Logs'}
+            </button>
           </div>
-        </div>
+          
+          {showDebugger && (
+            <div className="mt-4 p-4 bg-gray-100 border border-gray-300 rounded-lg font-mono text-xs max-h-40 overflow-y-auto">
+              <div>
+                {debugLog.map((log, i) => (
+                  <div key={i} className="mb-2 text-gray-700">{log}</div>
+                ))}
+                {debugLog.length === 0 && <div className="text-gray-500">No logs yet</div>}
+              </div>
+            </div>
+          )}
+        </>
       )}
     </div>
   );
