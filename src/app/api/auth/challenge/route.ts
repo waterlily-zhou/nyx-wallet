@@ -33,7 +33,13 @@ export async function GET(request: NextRequest) {
     }
     
     // Generate a random challenge
-    const challengeData = crypto.randomBytes(32);
+    const randomBytes = crypto.randomBytes(16);
+    const walletHash = walletAddress ? 
+      crypto.createHash('sha256').update(walletAddress).digest().slice(0, 16) : 
+      crypto.randomBytes(16);
+    
+    // Combine random bytes and wallet hash
+    const challengeData = Buffer.concat([randomBytes, walletHash]);
     const challengeBase64url = challengeData.toString('base64url');
     
     console.log('API: Generated challenge with length:', challengeBase64url.length);

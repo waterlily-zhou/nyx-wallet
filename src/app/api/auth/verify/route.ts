@@ -45,7 +45,7 @@ export async function POST(request: NextRequest) {
       
       // Additional verification: check that the challenge contains the wallet hash
       const walletHash = crypto.createHash('sha256').update(walletAddress).digest();
-      const challengeBuffer = Buffer.from(storedChallenge, 'base64');
+      const challengeBuffer = Buffer.from(storedChallenge, 'base64url');
       
       // The challenge should have wallet hash in the second half (bytes 16-32)
       if (challengeBuffer.length >= 32) {
@@ -134,17 +134,15 @@ export async function POST(request: NextRequest) {
       
       // The challenge from the credential is already in base64url format
       // We just need to ensure the stored challenge is in the same format
-      const storedChallengeBase64url = storedChallenge.replace(/=/g, '');
-      
-      if (credentialChallenge !== storedChallengeBase64url) {
+      if (credentialChallenge !== storedChallenge) {
         console.log('❌ Challenge mismatch');
         console.log('  - Credential challenge:', credentialChallenge);
-        console.log('  - Stored challenge (base64url):', storedChallengeBase64url);
+        console.log('  - Stored challenge:', storedChallenge);
         console.log('  - Challenge comparison:', {
-          length: credentialChallenge.length === storedChallengeBase64url.length,
+          length: credentialChallenge.length === storedChallenge.length,
           characters: {
             credential: credentialChallenge.split(''),
-            stored: storedChallengeBase64url.split('')
+            stored: storedChallenge.split('')
           }
         });
         throw new Error('Challenge mismatch');
