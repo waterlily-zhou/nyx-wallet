@@ -1,7 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { parseEther } from 'viem';
+import { parseEther, formatEther } from 'viem';
 
 interface TransactionFormProps {
   walletAddress: string;
@@ -30,9 +30,14 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         if (response.ok) {
           const data = await response.json();
           if (data.success && data.balance) {
-            // Convert wei to ETH for display
-            const balanceInEth = parseFloat(data.balance) / 1e18;
-            setMaxAmount(balanceInEth.toFixed(8));
+            // Convert wei to ETH using viem's formatEther
+            const balanceInEth = formatEther(BigInt(data.balance));
+            console.log('Form: Balance fetched', {
+              rawBalance: data.balance,
+              balanceInEth,
+              balanceInWei: BigInt(data.balance).toString()
+            });
+            setMaxAmount(balanceInEth);
           }
         }
       } catch (err) {
@@ -44,6 +49,10 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
   }, [walletAddress]);
 
   const handleSetMax = () => {
+    console.log('Form: Setting max amount', {
+      maxAmount,
+      maxAmountInWei: parseEther(maxAmount).toString()
+    });
     setAmount(maxAmount);
   };
 
@@ -65,15 +74,44 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
       setError('Amount must be greater than 0');
       return;
     }
+
+    // Add validation for maximum amount
+    const MAX_AMOUNT = 1000000; // 1 million ETH as a reasonable upper limit
+    if (parseFloat(amount) > MAX_AMOUNT) {
+      setError(`Amount cannot exceed ${MAX_AMOUNT.toLocaleString()} ETH`);
+      return;
+    }
     
-    if (parseFloat(amount) > parseFloat(maxAmount)) {
+    // Ensure the amount is a valid number with at most 18 decimal places
+    const cleanAmount = amount.replace(/[^\d.]/g, '');
+    const parts = cleanAmount.split('.');
+    const wholeNumber = parts[0];
+    const decimals = parts[1]?.slice(0, 18) || '';
+    const formattedAmount = `${wholeNumber}${decimals ? '.' + decimals : ''}`;
+    
+    // Log the comparison values
+    console.log('Form: Amount validation', {
+      originalAmount: amount,
+      cleanAmount,
+      formattedAmount,
+      maxAmount,
+      maxAmountFloat: parseFloat(maxAmount),
+      amountInWei: parseEther(formattedAmount).toString(),
+      maxAmountInWei: parseEther(maxAmount).toString(),
+      comparison: {
+        usingFloat: parseFloat(formattedAmount) > parseFloat(maxAmount),
+        usingWei: parseEther(formattedAmount) > parseEther(maxAmount)
+      }
+    });
+    
+    if (parseFloat(formattedAmount) > parseFloat(maxAmount)) {
       setError('Amount exceeds your balance');
       return;
     }
 
     onNext({
       recipient,
-      amount,
+      amount: formattedAmount,
       network
     });
   };
@@ -86,15 +124,15 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         {/* Network Selection */}
         <div>
           <div className="relative border border-gray-700 rounded-lg">
-             <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
+             <p className="absolute -top-2.5 left-2 text-sm text-gray-400 px-1 bg-zinc-900">
               Network
             </p>
             <div className="flex items-center p-4">
-              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-xs font-bold mr-3">
-                ETH
+              <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-xs mr-3">
+                Base
               </div>
               <div className="flex-1">
-                <div className="font-medium">{network}</div>
+                <div className="text-gray-100">{network}</div>
               </div>
               <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                 <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 9l-7 7-7-7"></path>
@@ -106,19 +144,19 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         {/* Recipient Address */}
         <div>
           <div className="relative border border-gray-700 rounded-lg">
-            <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
+            <p className="absolute -top-2.5 left-2 text-sm text-gray-400 px-1 bg-zinc-900">
             Recipient Address or ENS
             </p>
             <div className="flex items-center p-4">
-              <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs font-mono mr-3">
-                Base:
+              <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs mr-3">
+                Base
               </div>
               <input
                 id="recipient"
                 type="text"
                 value={recipient}
                 onChange={(e) => setRecipient(e.target.value)}
-                placeholder="0x... (Base Sepolia address)"
+                placeholder="0x..."
                 className="flex-1 bg-transparent border-none focus:outline-none"
               />
               <svg className="w-5 h-5 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -130,16 +168,25 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         
         {/* Amount */}
         <div>
-          <label htmlFor="amount" className="block text-sm font-medium mb-2">
+          <div className="relative border border-gray-700 rounded-lg flex items-center">
+          <p className="absolute -top-2.5 left-2 text-sm text-gray-400 px-1 bg-zinc-900">
             Amount
-          </label>
-          <div className="border border-gray-700 rounded-lg flex items-center">
+            </p>
             <input
               id="amount"
-              type="number"
-              step="0.000001"
+              type="text"
+              inputMode="decimal"
+              pattern="^[0-9]*[.]?[0-9]*$"
+              min="0"
+              max="1000000"
               value={amount}
-              onChange={(e) => setAmount(e.target.value)}
+              onChange={(e) => {
+                // Only allow numbers and a single decimal point
+                const value = e.target.value;
+                if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                  setAmount(value);
+                }
+              }}
               placeholder="0"
               className="flex-1 p-4 bg-transparent border-none focus:outline-none"
             />

@@ -10,10 +10,10 @@ interface TransactionFlowProps {
   onClose: () => void;
 }
 
-type TransactionStep = 'form' | 'confirmation' | 'status';
+type TransactionStep = 'create' | 'confirm' | 'complete';
 
 export default function TransactionFlow({ walletAddress, onClose }: TransactionFlowProps) {
-  const [currentStep, setCurrentStep] = useState<TransactionStep>('form');
+  const [currentStep, setCurrentStep] = useState<TransactionStep>('create');
   const [transactionDetails, setTransactionDetails] = useState<{
     recipient: string;
     amount: string;
@@ -24,16 +24,16 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
   // Step indicator dots
   const renderStepIndicator = () => (
     <div className="flex justify-center items-center mb-8">
-      {['form', 'confirmation', 'status'].map((step, index) => (
+      {['create', 'confirm', 'complete'].map((step, index) => (
         <div key={step} className="flex flex-col items-center relative w-32">
           <div className="flex items-center w-full justify-center">
             {/* Line before dot (except for first step) */}
             {index > 0 && (
               <div 
                 className={`absolute w-full h-0.5 top-1.5 right-1/2 ${
-                  index <= ['form', 'confirmation', 'status'].indexOf(currentStep)
-                    ? 'bg-slate-400'
-                    : 'bg-slate-500'
+                  index <= ['create', 'confirm', 'complete'].indexOf(currentStep)
+                    ? 'bg-gray-400'
+                    : 'bg-gray-700'
                 }`}
               />
             )}
@@ -43,17 +43,17 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
                 className={`w-3 h-3 rounded-full ${
                   step === currentStep 
                     ? 'bg-violet-500' 
-                    : index < ['form', 'confirmation', 'status'].indexOf(currentStep)
-                      ? 'bg-slate-400'
-                      : 'bg-slate-500'
+                    : index < ['create', 'confirm', 'complete'].indexOf(currentStep)
+                      ? 'bg-gray-400'
+                      : 'bg-gray-600'
                 }`}
               />
               <span className={`text-sm mt-2 capitalize ${
                 step === currentStep 
                   ? 'text-violet-500'
-                  : index < ['form', 'confirmation', 'status'].indexOf(currentStep)
-                    ? 'text-slate-400'
-                    : 'text-slate-500'
+                  : index < ['create', 'confirm', 'complete'].indexOf(currentStep)
+                    ? 'text-gray-400'
+                    : 'text-gray-600'
               }`}>
                 {step}
               </span>
@@ -67,18 +67,18 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
   // Handle form submission
   const handleFormSubmit = (formData: { recipient: string; amount: string; network: string }) => {
     setTransactionDetails(formData);
-    setCurrentStep('confirmation');
+    setCurrentStep('confirm');
   };
 
   // Handle confirmation
   const handleConfirmation = (selectedGasOption: 'default' | 'sponsored' | 'usdc' | 'bundler') => {
     setGasOption(selectedGasOption);
-    setCurrentStep('status');
+    setCurrentStep('complete');
   };
 
   // Handle back button on confirmation screen
   const handleBackToForm = () => {
-    setCurrentStep('form');
+    setCurrentStep('create');
   };
 
   // Handle finish transaction flow
@@ -91,14 +91,14 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
       <div className="relative bg-zinc-900 rounded-lg p-12 w-full max-w-xl max-h-[90vh] overflow-y-auto">
         {renderStepIndicator()}
         
-        {currentStep === 'form' && (
+        {currentStep === 'create' && (
           <TransactionForm 
             walletAddress={walletAddress} 
             onNext={handleFormSubmit} 
           />
         )}
         
-        {currentStep === 'confirmation' && transactionDetails && (
+        {currentStep === 'confirm' && transactionDetails && (
           <TransactionConfirmation 
             walletAddress={walletAddress}
             transactionDetails={transactionDetails}
@@ -107,7 +107,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
           />
         )}
         
-        {currentStep === 'status' && transactionDetails && (
+        {currentStep === 'complete' && transactionDetails && (
           <TransactionStatus 
             walletAddress={walletAddress}
             transactionDetails={transactionDetails}
@@ -117,7 +117,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
         )}
 
         {/* Close button - only visible on first two steps */}
-        {currentStep !== 'status' && (
+        {currentStep !== 'complete' && (
           <button 
             onClick={onClose}
             className="absolute top-4 right-4 text-gray-400 hover:text-white"

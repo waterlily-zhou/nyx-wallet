@@ -1,6 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
-import { Address, parseEther } from 'viem';
+import { Address, parseEther, formatEther } from 'viem';
 import { bundlerClient, createChainPublicClient } from '@/lib/client-setup';
 import { 
   verifyCalldata, 
@@ -9,6 +9,22 @@ import {
   checkEtherscanData,
   aiTransactionAnalysis
 } from '@/lib/utils/transaction-safety';
+
+export interface SimulationResult {
+  success: boolean;
+  simulated: boolean;
+  message: string;
+  warnings: string[];
+  estimatedGas?: string;
+  gasUsed?: string;
+  stateChanges?: any[];
+  logs?: any[];
+  error?: string;
+  details?: {
+    gasEstimate: string | null;
+    potentialErrors: string[];
+  };
+}
 
 // Helper function to safely execute API calls
 async function safeApiCall<T>(
@@ -53,6 +69,11 @@ export async function POST(request: NextRequest) {
     
     // Convert value from ETH to Wei
     const valueInWei = parseEther(value);
+    console.log('Safety: Transfer amount conversion', {
+      originalValue: value,
+      valueInWei: valueInWei.toString(),
+      valueBackToEth: formatEther(valueInWei)
+    });
     
     // Get balance using public client instead of bundler client
     let balance;
@@ -64,6 +85,24 @@ export async function POST(request: NextRequest) {
       balance = await publicClient.getBalance({
         address: walletAddress as Address
       });
+
+      console.log('Safety: Account balance', {
+        rawBalance: balance.toString(),
+        balanceInEth: formatEther(balance),
+        comparison: {
+          transferValue: {
+            eth: value,
+            wei: valueInWei.toString()
+          },
+          accountBalance: {
+            eth: formatEther(balance),
+            wei: balance.toString()
+          },
+          isValueGreaterOrEqual: valueInWei >= balance,
+          difference: formatEther(balance - valueInWei)
+        }
+      });
+
     } catch (error) {
       console.error('Error getting balance:', error);
       // Default to a large value if balance check fails
@@ -71,11 +110,36 @@ export async function POST(request: NextRequest) {
     }
     
     if (valueInWei >= balance) {
-      warnings.push('Transaction value is equal to or greater than current balance');
-    }
-    
-    if (valueInWei > parseEther('1')) {
-      warnings.push('Large transaction value detected (> 1 ETH)');
+      // Handle negative balance case
+      const remainingBalanceWei = valueInWei > balance ? 0n : balance - valueInWei;
+      const remainingBalanceEth = formatEther(remainingBalanceWei);
+      
+      console.log('Safety: Balance check details', {
+        transferAmount: {
+          eth: value,
+          wei: valueInWei.toString()
+        },
+        accountBalance: {
+          eth: formatEther(balance),
+          wei: balance.toString()
+        },
+        remaining: {
+          eth: remainingBalanceEth,
+          wei: remainingBalanceWei.toString()
+        },
+        percentageUsed: Number((valueInWei * 100n) / balance)
+      });
+
+      // Only add these warnings if the transaction is actually using most of the balance
+      if (valueInWei > balance * 8n / 10n) {
+        warnings.push(
+          'Transaction will use most of available balance',
+          'Limited funds will be left for gas fees',
+          `Remaining balance after transfer: ${remainingBalanceEth} ETH`
+        );
+      }
+    } else if (valueInWei > balance * 9n / 10n) {
+      warnings.push('Transaction uses more than 90% of available balance');
     }
 
     // 2. Verify calldata (more important for contract interactions)
@@ -107,14 +171,46 @@ export async function POST(request: NextRequest) {
         value: valueInWei.toString()
       }),
       {
-        success: true,
+        success: false,
         simulated: false,
-        message: 'Failed to simulate transaction',
-        warnings: ['Simulation failed']
+        message: 'Transaction simulation failed. This could indicate potential issues with the transaction.',
+        warnings: [
+          'Transaction simulation failed - proceed with caution',
+          'Consider reducing gas price or checking recipient contract state'
+        ],
+        details: {
+          gasEstimate: null,
+          potentialErrors: ['Simulation could not complete - transaction may revert']
+        }
       },
-      'Error simulating transaction'
+      'Error during transaction simulation'
     );
-    
+
+    // Add simulation-specific warnings
+    if (!simulationResults.success && simulationResults.simulated) {
+      warnings.push(
+        ...simulationResults.warnings,
+        'Transaction is likely to fail on-chain'
+      );
+    }
+
+    // Enhanced recipient checks
+    const recipientCodeSize = await safeApiCall(
+      async () => {
+        const publicClient = createChainPublicClient();
+        return await publicClient.getBytecode({ address: to as Address });
+      },
+      null,
+      'Error checking recipient code'
+    );
+
+    if (recipientCodeSize && recipientCodeSize.length > 2) {
+      warnings.push(
+        'Recipient is a smart contract - verify the contract is trusted',
+        'Review contract interactions carefully before proceeding'
+      );
+    }
+
     // 5. Check Etherscan data for the recipient with error handling
     const etherscanData = await safeApiCall(
       () => checkEtherscanData(to),
@@ -151,31 +247,48 @@ export async function POST(request: NextRequest) {
       'Error performing AI analysis'
     );
     
+    // Categorize warnings by severity
+    const criticalWarnings = warnings.filter(w => 
+      w.includes('will fail') || 
+      w.includes('no funds') ||
+      w.includes('suspicious') ||
+      w.includes('risky')
+    );
+    
+    const nonCriticalWarnings = warnings.filter(w => !criticalWarnings.includes(w));
+    
     // Determine if the transaction is safe based on all the checks
-    // Consider a transaction risky if any of these conditions are met
+    // Only consider critical warnings for risk assessment
     const isRisky = 
       !calldataVerification.overallMatch ||
       recipientRisk.isRisky ||
-      !simulationResults.success ||
-      (aiAnalysis.safetyScore < 70) ||
-      warnings.length > 0 ||
-      (etherscanData.warnings && etherscanData.warnings.length > 0);
+      (!simulationResults.success && simulationResults.simulated) ||
+      (aiAnalysis.safetyScore < 50) ||
+      criticalWarnings.length > 0 ||
+      (etherscanData.warnings && etherscanData.warnings.some(w => 
+        w.includes('suspicious') || w.includes('risky') || w.includes('malicious')
+      ));
     
-    // Safety message based on AI analysis
+    // Safety message based on AI analysis and warning severity
     const safetyMessage = isRisky 
       ? 'This transaction may have risks. Please review carefully.'
-      : 'This transaction appears safe based on our analysis.';
+      : nonCriticalWarnings.length > 0
+        ? 'This transaction appears safe but has some non-critical warnings.'
+        : 'This transaction appears safe based on our analysis.';
     
-    // Compile all warnings
-    const allWarnings = [
-      ...warnings,
-      ...(calldataVerification.suspiciousActions.containsSuspiciousSignatures ? 
-          [calldataVerification.suspiciousActions.suspiciousDetails] : []),
-      ...(recipientRisk.riskIndicators || []),
-      ...(simulationResults.warnings || []),
-      ...(etherscanData.warnings || []),
-      ...(aiAnalysis.redFlags || [])
-    ].filter(Boolean);
+    // Compile all warnings but separate them by severity
+    const allWarnings = {
+      critical: criticalWarnings,
+      nonCritical: nonCriticalWarnings,
+      other: [
+        ...(calldataVerification.suspiciousActions.containsSuspiciousSignatures ? 
+            [calldataVerification.suspiciousActions.suspiciousDetails] : []),
+        ...(recipientRisk.riskIndicators || []),
+        ...(simulationResults.warnings || []),
+        ...(etherscanData.warnings || []),
+        ...(aiAnalysis.redFlags || [])
+      ].filter(Boolean)
+    };
     
     // Compile recommendations from AI
     const recommendations = aiAnalysis.recommendations || [];

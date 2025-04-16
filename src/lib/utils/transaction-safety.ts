@@ -1,12 +1,44 @@
 // Native fetch is globally available in Next.js, no need to import
-import { parseEther, parseUnits } from 'viem';
+import { parseEther, parseUnits, formatEther } from 'viem';
+import { SimulationResult } from '@/app/api/transaction/safety/route';
 
 // Environment variables for API keys
 const ETHERSCAN_API_KEY = process.env.ETHERSCAN_API_KEY || '';
+const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
 const TENDERLY_ACCESS_KEY = process.env.TENDERLY_ACCESS_KEY || '';
 const TENDERLY_USER = process.env.TENDERLY_USER || '';
 const TENDERLY_PROJECT = process.env.TENDERLY_PROJECT || '';
-const CLAUDE_API_KEY = process.env.CLAUDE_API_KEY || '';
+
+// Add debug logging
+console.log('Claude API Key present:', !!CLAUDE_API_KEY);
+console.log('Claude API Key length:', CLAUDE_API_KEY.length);
+
+export interface TransactionSafetyData {
+  amount?: string;
+  currency?: string;
+  recipientRisk?: {
+    riskScore: number;
+    isRisky?: boolean;
+    riskIndicators?: string[];
+  };
+  calldataVerification?: {
+    recipientMatches: boolean;
+    valueMatches: boolean;
+    suspiciousActions?: {
+      containsSuspiciousSignatures?: boolean;
+    };
+  };
+  simulationResults?: {
+    success: boolean;
+    simulated: boolean;
+    warnings?: string[];
+  };
+  etherscanData?: {
+    isContract?: boolean;
+    isVerified?: boolean;
+    warnings?: string[];
+  };
+}
 
 // ----------------------------------
 // 1. Calldata Verification
@@ -285,32 +317,24 @@ export async function simulateTransaction(params: {
   recipient: string;
   callData: string;
   value: string;
-}) {
+}): Promise<SimulationResult> {
   try {
-    // If Tenderly API key is not set, fallback to simple checks
-    if (!TENDERLY_ACCESS_KEY) {
-      console.log('Tenderly API key not set, skipping simulation');
+    if (!TENDERLY_ACCESS_KEY || !TENDERLY_USER || !TENDERLY_PROJECT) {
+      console.log('Tenderly credentials not configured, skipping simulation');
       return {
         success: true,
         simulated: false,
-        message: 'Simulation skipped - Tenderly API key not configured',
-        estimatedGas: '100000',
+        message: 'Simulation skipped - Tenderly not configured',
         warnings: []
       };
     }
-    
-    // Prepare simulation payload for Tenderly
-    const simulationPayload = {
-      network_id: '11155111', // Sepolia network ID
-      from: params.sender,
-      to: params.recipient,
-      input: params.callData,
-      gas: 1000000,
-      gas_price: '1000000000',
-      value: params.value
-    };
-    
-    // Call Tenderly API
+
+    // Log the value being sent to Tenderly
+    console.log('Simulation value check:', {
+      receivedValue: params.value,
+      valueInEth: formatEther(BigInt(params.value)) // Convert Wei back to ETH for logging
+    });
+
     const response = await fetch(
       `https://api.tenderly.co/api/v1/account/${TENDERLY_USER}/project/${TENDERLY_PROJECT}/simulate`,
       {
@@ -319,22 +343,51 @@ export async function simulateTransaction(params: {
           'Content-Type': 'application/json',
           'X-Access-Key': TENDERLY_ACCESS_KEY
         },
-        body: JSON.stringify(simulationPayload)
+        body: JSON.stringify({
+          save: true,
+          save_if_fails: true,
+          simulation_type: 'quick',
+          network_id: '11155111', // Sepolia
+          from: params.sender,
+          to: params.recipient,
+          input: params.callData,
+          value: params.value, // Already in Wei, no need to convert
+          gas: 1000000,
+          gas_price: '0',
+          state_objects: {
+            [params.sender]: {
+              balance: parseEther('10').toString() // Ensure sufficient balance for simulation
+            }
+          }
+        })
       }
     );
-    
-    const data = await response.json();
-    
-    // Check if we got a valid response
-    if (!data || !data.transaction) {
-      console.warn('Invalid response from Tenderly API:', data);
+
+    if (!response.ok) {
+      const errorData = await response.json();
+      console.error('Tenderly simulation failed:', errorData);
+      
+      // Check for specific error types
+      if (errorData.error?.includes('insufficient funds')) {
+        return {
+          success: false,
+          simulated: true,
+          message: 'Transaction would fail - Insufficient funds for gas',
+          warnings: ['Insufficient funds to cover gas costs'],
+          error: 'Insufficient funds'
+        };
+      }
+      
       return {
-        success: true, // Default to success if simulation fails
-        simulated: false,
-        message: 'Invalid response from Tenderly API',
-        warnings: ['Could not get valid simulation results']
+        success: false,
+        simulated: true,
+        message: 'Simulation failed - ' + (errorData.error || 'Unknown error'),
+        warnings: ['Simulation encountered an error'],
+        error: errorData.error
       };
     }
+
+    const data = await response.json();
     
     // Analyze results
     const warnings = [];
@@ -347,31 +400,24 @@ export async function simulateTransaction(params: {
       warnings.push('High gas usage detected');
     }
     
-    // Check for unusual state changes
-    if (data.transaction.state_diff) {
-      // This would need more sophisticated analysis in production
-      const stateChanges = Object.keys(data.transaction.state_diff).length;
-      if (stateChanges > 10) {
-        warnings.push(`Large number of state changes (${stateChanges})`);
-      }
-    }
-    
     return {
       success: data.transaction.status,
       simulated: true,
-      gasUsed: data.transaction.gas_used || 0,
-      stateChanges: data.transaction.state_diff ? Object.keys(data.transaction.state_diff).length : 0,
-      logs: data.transaction.logs ? data.transaction.logs.length : 0,
-      warnings
+      message: data.transaction.status ? 'Transaction simulation successful' : 'Transaction would fail',
+      warnings,
+      estimatedGas: data.transaction.gas_used?.toString(),
+      gasUsed: data.transaction.gas_used?.toString(),
+      stateChanges: data.transaction.state_diff ? Object.keys(data.transaction.state_diff) : [],
+      logs: data.transaction.logs || []
     };
   } catch (error) {
     console.error('Error simulating transaction:', error);
     return {
       success: true, // Default to success if simulation fails
       simulated: false,
-      error: error instanceof Error ? error.message : 'Unknown error',
       message: 'Could not simulate transaction',
-      warnings: ['Could not complete simulation']
+      warnings: ['Simulation service unavailable'],
+      error: error instanceof Error ? error.message : 'Unknown error'
     };
   }
 }
@@ -451,14 +497,23 @@ export async function checkEtherscanData(address: string) {
 // ----------------------------------
 export async function aiTransactionAnalysis(data: any) {
   try {
-    // Skip if Claude API key not set
     if (!CLAUDE_API_KEY) {
-      console.log('Claude API key not set, skipping AI analysis');
+      console.log('Claude API not configured, using basic safety score');
+      // Extract amount and currency from the amount string (e.g., "0.001 ETH")
+      const [amountValue, currency] = (data.amount || '').split(' ');
       return {
-        safetyScore: calculateBasicSafetyScore(data),
-        safetyAnalysis: 'AI analysis skipped - API key not configured',
-        recommendations: ['Configure Claude API key for detailed AI analysis'],
-        aiServiceUsed: 'None'
+        safetyScore: calculateBasicSafetyScore({
+          amount: amountValue,
+          currency: currency || 'unknown', // Default to ETH if not specified
+          calldataVerification: data.calldataVerification,
+          recipientRisk: data.recipientRisk,
+          simulationResults: data.simulationResults,
+          etherscanData: data.etherscanData
+        }),
+        safetyAnalysis: 'Basic safety analysis only - AI service not configured',
+        recommendations: ['Verify transaction details carefully'],
+        redFlags: [],
+        aiServiceUsed: 'None (not configured)'
       };
     }
     
@@ -468,7 +523,7 @@ export async function aiTransactionAnalysis(data: any) {
       
       Transaction details:
       - Type: ${data.transactionType || 'Unknown'}
-      - Amount: ${data.amount || '0'} ${data.currency || 'ETH'}
+      - Amount: ${data.amount?.split(' ')[0] || '0'} ETH
       - Message included: ${data.message ? `"${data.message}"` : 'None'}
       
       Call data verification:
@@ -485,7 +540,6 @@ export async function aiTransactionAnalysis(data: any) {
       - Details: ${data.recipientRisk?.details || 'No details available'}
       ${data.recipientRisk?.isNewAddress !== undefined ? `- Is new address: ${data.recipientRisk.isNewAddress}` : ''}
       ${data.recipientRisk?.isContract !== undefined ? `- Is contract: ${data.recipientRisk.isContract}` : ''}
-      
       
       Transaction simulation:
       - Success: ${data.simulationResults?.success || false}
@@ -504,10 +558,12 @@ export async function aiTransactionAnalysis(data: any) {
       - Warnings: ${data.etherscanData?.warnings ? data.etherscanData.warnings.join(', ') : 'None'}
       
       Analyze the safety of this transaction. Identify any red flags or suspicious elements. 
-      Pay special attention to any risk indicators from GoPlus Security API, as these are strong signals of potential scams.
+      Pay special attention to calldata, any mismatch with the UI or other transaction data indicates a scam. 
+      Risk indicators from GoPlus Security API are also strong signals of potential scams.
       Provide an overall safety score between 0-100 where 100 is completely safe.
-      If "phishing_activities" or "blacklist_doubt" are found, these are serious concerns and should significantly reduce the safety score.
-      Give specific recommendations for the user.
+      If "phishing_activities" or "blacklist_doubt" are found, or the 'recipient' or 'amount' in the calldata doesn't match the UI, these are serious concerns and should significantly reduce the safety score.
+      If there's any suspitious matter, give specific recommendations for the user.
+      Be concise, to the point and specific.
       
       Format your response as JSON with the following structure:
       {
@@ -710,62 +766,83 @@ async function handleClaudeResponse(aiResponse: any, serviceUsed: string) {
 // ----------------------------------
 // 8. Basic Fallback Scoring (No AI)
 // ----------------------------------
-function calculateBasicSafetyScore(data: any): number {
-  let score = 100; // Start with perfect score and subtract for issues
+export function calculateBasicSafetyScore(data: TransactionSafetyData): number {
+  let score = 100; // Start with perfect score
+  const reductions: { reason: string; amount: number }[] = [];
+
+  // Convert amount to ETH for comparison (if it exists)
+  const amountInEth = data.amount ? parseFloat(data.amount) : 0;
+  const currency = data.currency || 'unknown'; 
   
-  // Calldata verification issues
-  if (!data.calldataVerification.recipientMatches) score -= 30;
-  if (!data.calldataVerification.valueMatches) score -= 20;
-  if (data.calldataVerification.suspiciousActions.containsSuspiciousSignatures) score -= 40;
-  
-  // Recipient risk issues from GoPlus
-  if (data.recipientRisk.riskScore) {
-    score -= data.recipientRisk.riskScore * 0.3; // Scale down risk score
+  console.log('Basic safety score: Amount check', {
+    originalAmount: data.amount,
+    amountInEth,
+    currency,
+    amountWithCurrency: `${amountInEth} ${currency}`
+  });
+
+  // Check for very large transfers (> 100 ETH)
+  if (currency === 'ETH' && amountInEth > 100) {
+    const reduction = Math.min(30, Math.floor(amountInEth / 100) * 5);
+    reductions.push({ reason: 'Large transfer amount', amount: reduction });
+    score -= reduction;
   }
-  
-  // Check for specific high-risk indicators
-  if (data.recipientRisk.riskIndicators && data.recipientRisk.riskIndicators.length > 0) {
-    // Each risk indicator reduces the score
-    score -= Math.min(data.recipientRisk.riskIndicators.length * 7, 30);
-    
-    // Some risk indicators are more serious than others
-    const highRiskIndicators = [
-      'phishing_activities', 
-      'blacklist_doubt',
-      'cybercrime',
-      'money_laundering',
-      'darkweb_transactions',
-      'sanctioned',
-      'stealing_attack'
-    ];
-    
-    // Check if any high risk indicators are present
-    for (const indicator of data.recipientRisk.riskIndicators) {
-      for (const highRiskKey of highRiskIndicators) {
-        if (indicator.toLowerCase().includes(highRiskKey)) {
-          // Serious issue detected, significant penalty
-          score -= 25;
-          break;
-        }
-      }
+
+  // Recipient risk checks
+  if (data.recipientRisk?.riskScore) {
+    const riskReduction = Math.floor(data.recipientRisk.riskScore / 2);
+    reductions.push({ reason: 'Recipient risk score', amount: riskReduction });
+    score -= riskReduction;
+  }
+
+  // Calldata verification
+  if (data.calldataVerification) {
+    if (!data.calldataVerification.recipientMatches) {
+      reductions.push({ reason: 'Recipient mismatch', amount: 50 });
+      score -= 50;
+    }
+    if (!data.calldataVerification.valueMatches) {
+      reductions.push({ reason: 'Value mismatch', amount: 50 });
+      score -= 50;
+    }
+    if (data.calldataVerification.suspiciousActions?.containsSuspiciousSignatures) {
+      reductions.push({ reason: 'Suspicious signatures', amount: 40 });
+      score -= 40;
     }
   }
-  
-  // Legacy checks for fallback mode
-  if (data.recipientRisk.isNewAddress) score -= 10;
-  if (data.recipientRisk.isContract && data.etherscanData && !data.etherscanData.isVerified) score -= 15;
-  
-  // Simulation issues
-  if (data.simulationResults.simulated && !data.simulationResults.success) score -= 40;
-  if (data.simulationResults.warnings && data.simulationResults.warnings.length > 0) {
-    score -= Math.min(data.simulationResults.warnings.length * 10, 30);
+
+  // Simulation results
+  if (data.simulationResults) {
+    if (!data.simulationResults.success) {
+      reductions.push({ reason: 'Failed simulation', amount: 30 });
+      score -= 30;
+    }
+    if (data.simulationResults.warnings?.length) {
+      const warningReduction = Math.min(20, data.simulationResults.warnings.length * 5);
+      reductions.push({ reason: 'Simulation warnings', amount: warningReduction });
+      score -= warningReduction;
+    }
   }
-  
-  // Etherscan issues
-  if (data.etherscanData && data.etherscanData.warnings && data.etherscanData.warnings.length > 0) {
-    score -= Math.min(data.etherscanData.warnings.length * 5, 20);
+
+  // Contract verification
+  if (data.etherscanData?.isContract && !data.etherscanData?.isVerified) {
+    reductions.push({ reason: 'Unverified contract', amount: 20 });
+    score -= 20;
   }
-  
-  // Cap the score between 0 and 100
-  return Math.max(0, Math.min(100, Math.round(score)));
+
+  // Log scoring details
+  console.log('Basic safety score calculation:', {
+    finalScore: Math.max(0, score),
+    reductions,
+    transactionDetails: {
+      amount: amountInEth,
+      currency: data.currency,
+      recipientRisk: data.recipientRisk,
+      calldataVerification: data.calldataVerification,
+      simulationResults: data.simulationResults,
+      etherscanData: data.etherscanData
+    }
+  });
+
+  return Math.max(0, score);
 } 

@@ -1,12 +1,12 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-import { parseEther } from 'viem';
 
 interface TransactionDetails {
   recipient: string;
   amount: string;
   network: string;
+  calldata?: string;
 }
 
 interface TransactionConfirmationProps {
@@ -88,7 +88,10 @@ export default function TransactionConfirmation({
           body: JSON.stringify({
             to: transactionDetails.recipient,
             value: transactionDetails.amount,
-            data: '0x' // Simple ETH transfer
+            data: transactionDetails.calldata || '0x',
+            from: walletAddress,
+            network: transactionDetails.network,
+            type: 'TRANSFER'
           })
         });
 
@@ -97,6 +100,12 @@ export default function TransactionConfirmation({
         }
 
         const safetyResult = await safetyResponse.json();
+        console.log('Safety analysis request:', {
+          to: transactionDetails.recipient,
+          value: transactionDetails.amount,
+          from: walletAddress,
+          network: transactionDetails.network
+        });
         console.log('Safety analysis:', safetyResult);
         setSafetyAnalysis(safetyResult);
       } catch (err) {
@@ -108,7 +117,7 @@ export default function TransactionConfirmation({
     };
 
     checkTransactionSafety();
-  }, [transactionDetails]);
+  }, [transactionDetails, walletAddress]);
 
   const handleConfirm = () => {
     onConfirm(selectedGasOption);
@@ -136,20 +145,20 @@ export default function TransactionConfirmation({
 
   return (
     <div className="w-full max-w-lg mx-auto">
-      <h2 className="text-3xl font-bold mb-8">Confirm Transaction</h2>
+      <h2 className="text-xl mb-8">Confirm transaction</h2>
 
       {isLoading ? (
-        <div className="space-y-6">
+        <div className="space-y-4">
           <div className="animate-pulse h-32 bg-gray-800 rounded-lg"></div>
           <div className="animate-pulse h-48 bg-gray-800 rounded-lg"></div>
           <div className="animate-pulse h-32 bg-gray-800 rounded-lg"></div>
         </div>
       ) : (
-        <div className="space-y-6">
+        <div className="space-y-4">
           {/* Transaction Details Card */}
           <div className="border border-gray-700 rounded-lg p-4">
-            <h3 className="text-xl font-semibold mb-4">Transaction Details</h3>
-            <div className="space-y-3">
+            <h3 className="mb-4">Transaction Details</h3>
+            <div className="space-y-2">
               <div className="flex justify-between">
                 <span className="text-gray-400">From</span>
                 <span className="font-mono text-sm">{formatAddress(walletAddress)}</span>
@@ -175,7 +184,7 @@ export default function TransactionConfirmation({
 
           {/* AI Analysis Card */}
           <div className="border border-gray-700 rounded-lg p-4">
-            <h3 className="text-xl font-semibold mb-4">AI Analysis</h3>
+            <h3 className="mb-4">AI Analysis</h3>
             {error ? (
               <div className="p-3 bg-red-900/50 border border-red-600 rounded-md text-sm">
                 {error}
@@ -192,10 +201,28 @@ export default function TransactionConfirmation({
                           : 'Potential risks detected'}
                       </span>
                       {safetyAnalysis.safetyCheck.safetyScore && (
-                        <span className="ml-auto text-sm">
+                        <span className="ml-auto text-sm flex items-center">
                           Safety Score: 
                           <span className={`ml-1 font-semibold ${getSafetyScoreColor(safetyAnalysis.safetyCheck.safetyScore)}`}>
                             {safetyAnalysis.safetyCheck.safetyScore}/100
+                          </span>
+                          <span className="inline-flex items-center ml-1 text-gray-400 group relative">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="currentColor" className="w-4 h-4">
+                              <path fillRule="evenodd" d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a.75.75 0 000 1.5h.253a.25.25 0 01.244.304l-.459 2.066A1.75 1.75 0 0010.747 15H11a.75.75 0 000-1.5h-.253a.25.25 0 01-.244-.304l.459-2.066A1.75 1.75 0 009.253 9H9z" clipRule="evenodd" />
+                            </svg>
+                            <div className="absolute z-50 bottom-full right-0 mb-2 w-72 p-2 bg-gray-800 rounded-lg text-xs text-gray-300 opacity-0 invisible group-hover:opacity-100 group-hover:visible transition-all duration-200 shadow-lg">
+                              <p className="font-medium mb-1">Safety Score Calculation:</p>
+                              <ul className="space-y-1 list-disc pl-4">
+                                <li>Calldata verification (-30 if recipient mismatch, -20 if value mismatch)</li>
+                                <li>Suspicious actions (-40 if detected)</li>
+                                <li>Recipient risk score (scaled impact)</li>
+                                <li>Risk indicators (-7 each, max -30)</li>
+                                <li>High-risk indicators (-25 each)</li>
+                                <li>Contract verification (-15 if unverified)</li>
+                                <li>Simulation results (-40 if failed)</li>
+                                <li>Transaction warnings (-10 each, max -30)</li>
+                              </ul>
+                            </div>
                           </span>
                         </span>
                       )}
@@ -242,12 +269,17 @@ export default function TransactionConfirmation({
                               {/* Verification result with clearer explanation */}
                               <div className="mb-2 pb-2 border-b border-gray-700">
                                 <p className="font-medium mb-1">Verification Summary:</p>
-                                <p className="text-green-400">
-                                  Verified as a standard ETH transfer
+                                <p className={`${safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches && 
+                                  safetyAnalysis.safetyCheck.details?.calldataVerification?.valueMatches ? 
+                                  'text-green-400' : 'text-yellow-400'}`}>
+                                  {safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches && 
+                                   safetyAnalysis.safetyCheck.details?.calldataVerification?.valueMatches ? 
+                                   'Transaction details verified' : 'Verification warning'}
                                 </p>
                                 <p className="text-xs mt-1 text-gray-400">
-                                  For simple ETH transfers, the recipient and amount are transmitted as transaction parameters, 
-                                  not in the calldata. This has been verified as a standard transfer.
+                                  {safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
+                                    safetyAnalysis.safetyCheck.details.calldataVerification.suspiciousActions.suspiciousDetails :
+                                    'No suspicious actions detected in the transaction data.'}
                                 </p>
                               </div>
 
@@ -257,20 +289,33 @@ export default function TransactionConfirmation({
                                 <div className="bg-gray-900 p-3 rounded">
                                   <div className="grid grid-cols-[100px_1fr] gap-1 text-xs">
                                     <span className="text-gray-400">Function:</span>
-                                    <span className="text-green-400 font-mono">Native ETH Transfer</span>
+                                    <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
+                                      'text-yellow-400' : 'text-green-400'}>
+                                      {safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
+                                        'Contract Interaction' : 'Native ETH Transfer'}
+                                    </span>
                                     
                                     <span className="text-gray-400">To:</span>
                                     <div className="break-all font-mono">
-                                      <span>{transactionDetails.recipient}</span>
+                                      <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches ? 
+                                        'text-green-400' : 'text-yellow-400'}>
+                                        {transactionDetails.recipient}
+                                      </span>
                                     </div>
                                     
                                     <span className="text-gray-400">Value:</span>
                                     <div className="font-mono">
-                                      <span>{transactionDetails.amount} ETH</span>
+                                      <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.valueMatches ? 
+                                        'text-green-400' : 'text-yellow-400'}>
+                                        {transactionDetails.amount} ETH
+                                      </span>
                                     </div>
                                     
                                     <span className="text-gray-400">Data:</span>
-                                    <span className="font-mono">Empty (Standard transfer)</span>
+                                    <span className="font-mono">
+                                      {safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
+                                        'Contract interaction data present' : 'Empty (Standard transfer)'}
+                                    </span>
                                   </div>
                                 </div>
                               </div>
