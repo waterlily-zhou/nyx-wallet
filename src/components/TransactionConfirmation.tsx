@@ -6,6 +6,7 @@ interface TransactionDetails {
   recipient: string;
   amount: string;
   network: string;
+  currency?: string;
   calldata?: string;
 }
 
@@ -158,26 +159,26 @@ export default function TransactionConfirmation({
           {/* Transaction Details Card */}
           <div className="border border-gray-700 rounded-lg p-4">
             <h3 className="mb-4">Transaction Details</h3>
-            <div className="space-y-2">
+            <div className="space-y-4">
               <div className="flex justify-between">
-                <span className="text-gray-400">From</span>
-                <span className="font-mono text-sm">{formatAddress(walletAddress)}</span>
+                <span className="text-gray-400 text-xs">From</span>
+                <span className="font-mono text-xs">{walletAddress}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">To</span>
-                <span className="font-mono text-sm">{formatAddress(transactionDetails.recipient)}</span>
+                <span className="text-gray-400 text-xs">To</span>
+                <span className="font-mono text-xs">{transactionDetails.recipient}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">Network</span>
-                <span>{transactionDetails.network}</span>
+                <span className="text-gray-400 text-xs">Network</span>
+                <span className="text-xs">{transactionDetails.network}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">Amount</span>
-                <span>{transactionDetails.amount} ETH</span>
+                <span className="text-gray-400 text-xs">Amount</span>
+                <span className="text-xs">{transactionDetails.amount} ETH</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-gray-400">Transaction Type</span>
-                <span>Transfer</span>
+                <span className="text-gray-400 text-xs">Transaction Type</span>
+                <span className="text-xs">Transfer</span>
               </div>
             </div>
           </div>
@@ -195,7 +196,8 @@ export default function TransactionConfirmation({
                   <>
                     <div className="flex items-center">
                       <div className={`w-3 h-3 rounded-full ${getSafetyColor()} mr-2`}></div>
-                      <span className="font-medium">
+                      <span className={`${safetyAnalysis.safetyCheck.isSafe ? 
+                                  'text-green-400' : 'text-yellow-400'}`}>
                         {safetyAnalysis.safetyCheck.isSafe 
                           ? 'Transaction appears safe' 
                           : 'Potential risks detected'}
@@ -267,8 +269,7 @@ export default function TransactionConfirmation({
                           {safetyAnalysis.safetyCheck.details?.calldataVerification && (
                             <>
                               {/* Verification result with clearer explanation */}
-                              <div className="mb-2 pb-2 border-b border-gray-700">
-                                <p className="font-medium mb-1">Verification Summary:</p>
+                              <div className="mb-2 pb-2 border-b border-gray-700 text-sm">
                                 <p className={`${safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches && 
                                   safetyAnalysis.safetyCheck.details?.calldataVerification?.valueMatches ? 
                                   'text-green-400' : 'text-yellow-400'}`}>
@@ -285,20 +286,18 @@ export default function TransactionConfirmation({
 
                               {/* Decoded Transaction Data */}
                               <div className="mb-4 pb-2 border-b border-gray-700">
-                                <p className="font-medium mb-2">Decoded Transaction:</p>
+                                <p className="font-medium mb-2">Decoded Transaction Data:</p>
                                 <div className="bg-gray-900 p-3 rounded">
                                   <div className="grid grid-cols-[100px_1fr] gap-1 text-xs">
                                     <span className="text-gray-400">Function:</span>
-                                    <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
-                                      'text-yellow-400' : 'text-green-400'}>
+                                    <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 'text-yellow-400' : ''}>
                                       {safetyAnalysis.safetyCheck.details?.calldataVerification?.suspiciousActions?.containsSuspiciousSignatures ? 
                                         'Contract Interaction' : 'Native ETH Transfer'}
                                     </span>
                                     
                                     <span className="text-gray-400">To:</span>
                                     <div className="break-all font-mono">
-                                      <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches ? 
-                                        'text-green-400' : 'text-yellow-400'}>
+                                      <span className={!safetyAnalysis.safetyCheck.details?.calldataVerification?.recipientMatches ? 'text-yellow-400' : ''}>
                                         {transactionDetails.recipient}
                                       </span>
                                     </div>
@@ -306,8 +305,8 @@ export default function TransactionConfirmation({
                                     <span className="text-gray-400">Value:</span>
                                     <div className="font-mono">
                                       <span className={safetyAnalysis.safetyCheck.details?.calldataVerification?.valueMatches ? 
-                                        'text-green-400' : 'text-yellow-400'}>
-                                        {transactionDetails.amount} ETH
+                                        '' : 'text-yellow-400'}>
+                                        {transactionDetails.amount} {transactionDetails.currency}
                                       </span>
                                     </div>
                                     
@@ -324,7 +323,7 @@ export default function TransactionConfirmation({
                               <div className="mb-2">
                                 <p className="font-medium mb-1">Suspicious Functions:</p>
                                 <p className={!safetyAnalysis.safetyCheck.details.calldataVerification.suspiciousActions?.containsSuspiciousSignatures 
-                                  ? "text-green-400" : "text-red-400 font-bold"}>
+                                  ? "" : "text-red-400 font-bold"}>
                                   {safetyAnalysis.safetyCheck.details.calldataVerification.suspiciousActions?.containsSuspiciousSignatures 
                                     ? "DETECTED - POTENTIAL RISK" 
                                     : "None detected"}
@@ -351,14 +350,13 @@ export default function TransactionConfirmation({
                       
                       <details className="mb-3">
                         <summary className="font-medium text-sm cursor-pointer hover:text-violet-400">
-                          Address Security Check
+                          Recipient Address Trust Check 
                         </summary>
                         <div className="mt-2 p-3 bg-gray-800/50 rounded-md text-xs space-y-1 text-gray-300">
                           {safetyAnalysis.safetyCheck.details?.recipientRisk && (
                             <>
                               {/* Security verdict based on malicious activities */}
                               <div className="mb-3 pb-2 border-b border-gray-700">
-                                <p className="font-medium mb-1">Security Verdict:</p>
                                 <p className={safetyAnalysis.safetyCheck.details.recipientRisk.riskIndicators?.length === 0 
                                   ? "text-green-400 font-semibold" 
                                   : "text-red-400 font-semibold"}>
@@ -446,7 +444,7 @@ export default function TransactionConfirmation({
                                     <p className={safetyAnalysis.safetyCheck.details.simulationResults.stateChanges > 5 
                                       ? "text-yellow-400" 
                                       : "text-gray-300"}>
-                                      {safetyAnalysis.safetyCheck.details.simulationResults.stateChanges} state changes detected
+                                      {safetyAnalysis.safetyCheck.details.simulationResults.stateChanges}
                                     </p>
                                     <p className="text-xs text-gray-400 mt-1">
                                       {safetyAnalysis.safetyCheck.details.simulationResults.stateChanges > 5
@@ -455,7 +453,7 @@ export default function TransactionConfirmation({
                                     </p>
                                   </div>
                                 ) : (
-                                  <p className="text-gray-400">State changes information not available</p>
+                                  <p className="text-gray-400">Information not available</p>
                                 )}
                               </div>
                               
@@ -498,7 +496,7 @@ export default function TransactionConfirmation({
                       
                       <details className="mb-3">
                         <summary className="font-medium text-sm cursor-pointer hover:text-violet-400">
-                          Recipient History & Verification
+                          Recipient History
                         </summary>
                         <div className="mt-2 p-3 bg-gray-800/50 rounded-md text-xs space-y-1 text-gray-300">
                           {safetyAnalysis.safetyCheck.details?.etherscanData && (
@@ -514,7 +512,7 @@ export default function TransactionConfirmation({
                               {/* Is it a contract */}
                               <div className="flex justify-between">
                                 <span>Sending to a contract:</span>
-                                <span className={safetyAnalysis.safetyCheck.details.etherscanData.isContract ? "text-yellow-400" : "text-green-400"}>
+                                <span className={safetyAnalysis.safetyCheck.details.etherscanData.isContract ? "text-yellow-400" : ""}>
                                   {safetyAnalysis.safetyCheck.details.etherscanData.isContract ? "Yes" : "No"}
                                 </span>
                               </div>
@@ -528,7 +526,7 @@ export default function TransactionConfirmation({
                                   </div>
                                   <div className="flex justify-between">
                                     <span>Verified contract:</span>
-                                    <span className={safetyAnalysis.safetyCheck.details.etherscanData.isVerified ? "text-green-400" : "text-yellow-400"}>
+                                    <span className={safetyAnalysis.safetyCheck.details.etherscanData.isVerified ? "" : "text-yellow-400"}>
                                       {safetyAnalysis.safetyCheck.details.etherscanData.isVerified ? "Yes" : "No"}
                                     </span>
                                   </div>
@@ -593,10 +591,10 @@ export default function TransactionConfirmation({
 
           {/* Gas Options Card */}
           <div className="border border-gray-700 rounded-lg p-4">
-            <h3 className="text-xl font-semibold mb-4">Gas options & Bundler</h3>
+            <h3 className="mb-4">Gas options</h3>
             <div className="space-y-3">
               <div>
-                <label className="flex items-center space-x-2">
+                <label className="flex items-center space-x-2 text-sm">
                   <input
                     type="radio"
                     name="gasOption"
@@ -611,7 +609,7 @@ export default function TransactionConfirmation({
               </div>
               
               <div>
-                <label className="flex items-center space-x-2">
+                <label className="flex items-center space-x-2 text-sm">
                   <input
                     type="radio"
                     name="gasOption"
@@ -626,7 +624,7 @@ export default function TransactionConfirmation({
               </div>
               
               <div>
-                <label className="flex items-center space-x-2">
+                <label className="flex items-center space-x-2 text-sm">
                   <input
                     type="radio"
                     name="gasOption" 
