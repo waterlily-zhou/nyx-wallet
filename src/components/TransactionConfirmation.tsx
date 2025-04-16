@@ -627,7 +627,7 @@ export default function TransactionConfirmation({
                 <label className="flex items-center space-x-2 text-sm">
                   <input
                     type="radio"
-                    name="gasOption" 
+                    name="gasOption"
                     value="usdc"
                     checked={selectedGasOption === 'usdc'}
                     onChange={() => setSelectedGasOption('usdc')}
@@ -637,6 +637,37 @@ export default function TransactionConfirmation({
                 </label>
                 <p className="text-sm text-gray-400 ml-6">Use USDC from your wallet to pay gas fees</p>
               </div>
+
+              {/* Gas Speed Options */}
+              {/* {selectedGasOption !== 'sponsored' && ( */}
+                <div className="mt-4 pt-4 border-t border-gray-700">
+                  <p className="text-sm mb-3">Transaction Speed</p>
+                  <div className="grid grid-cols-3 gap-2">
+                    <button
+                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                    >
+                      <div className="font-medium">Slow</div>
+                      <div className="text-gray-400">~5 min</div>
+                      <div className="mt-1">$0.50</div>
+                    </button>
+                    <button
+                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                    >
+                      <div className="font-medium">Normal</div>
+                      <div className="text-gray-400">~2 min</div>
+                      <div className="mt-1">$0.75</div>
+                    </button>
+                    <button
+                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
+                    >
+                      <div className="font-medium">Fast</div>
+                      <div className="text-gray-400">~30 sec</div>
+                      <div className="mt-1">$1.00</div>
+                    </button>
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">* Estimated fees and times</p>
+                </div>
+             {/*  )} */}
             </div>
           </div>
 
