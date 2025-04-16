@@ -80,13 +80,15 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
 
   return (
     <div className="w-full max-w-lg mx-auto">
-      <h2 className="text-3xl font-bold mb-8">Send Tokens</h2>
+      <h2 className="text-xl mb-8">Create a transaction</h2>
       
       <form onSubmit={handleSubmit} className="space-y-6">
         {/* Network Selection */}
         <div>
-          <label className="block text-sm font-medium mb-2">Network</label>
           <div className="relative border border-gray-700 rounded-lg">
+             <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
+              Network
+            </p>
             <div className="flex items-center p-4">
               <div className="w-8 h-8 bg-blue-500 rounded-full flex items-center justify-center text-xs font-bold mr-3">
                 ETH
@@ -103,10 +105,10 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         
         {/* Recipient Address */}
         <div>
-          <label htmlFor="recipient" className="block text-sm font-medium mb-2">
-            Recipient Address or ENS
-          </label>
           <div className="relative border border-gray-700 rounded-lg">
+            <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
+            Recipient Address or ENS
+            </p>
             <div className="flex items-center p-4">
               <div className="w-8 h-8 bg-gray-600 rounded-full flex items-center justify-center text-xs font-mono mr-3">
                 Base:

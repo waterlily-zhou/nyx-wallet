@@ -23,27 +23,42 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
 
   // Step indicator dots
   const renderStepIndicator = () => (
-    <div className="flex justify-center items-center space-x-2 mb-8">
+    <div className="flex justify-center items-center mb-8">
       {['form', 'confirmation', 'status'].map((step, index) => (
-        <div key={step} className="flex items-center">
-          <div 
-            className={`w-3 h-3 rounded-full ${
-              step === currentStep 
-                ? 'bg-violet-500 border-2 border-violet-300' 
-                : index < ['form', 'confirmation', 'status'].indexOf(currentStep)
-                  ? 'bg-gray-400'
-                  : 'bg-gray-700'
-            }`}
-          />
-          {index < 2 && (
-            <div 
-              className={`w-8 h-0.5 ${
-                index < ['form', 'confirmation', 'status'].indexOf(currentStep)
-                  ? 'bg-gray-400'
-                  : 'bg-gray-700'
-              }`}
-            />
-          )}
+        <div key={step} className="flex flex-col items-center relative w-32">
+          <div className="flex items-center w-full justify-center">
+            {/* Line before dot (except for first step) */}
+            {index > 0 && (
+              <div 
+                className={`absolute w-full h-0.5 top-1.5 right-1/2 ${
+                  index <= ['form', 'confirmation', 'status'].indexOf(currentStep)
+                    ? 'bg-slate-400'
+                    : 'bg-slate-500'
+                }`}
+              />
+            )}
+            {/* Dot and text as a unified component */}
+            <div className="flex flex-col items-center relative z-10">
+              <div 
+                className={`w-3 h-3 rounded-full ${
+                  step === currentStep 
+                    ? 'bg-violet-500' 
+                    : index < ['form', 'confirmation', 'status'].indexOf(currentStep)
+                      ? 'bg-slate-400'
+                      : 'bg-slate-500'
+                }`}
+              />
+              <span className={`text-sm mt-2 capitalize ${
+                step === currentStep 
+                  ? 'text-violet-500'
+                  : index < ['form', 'confirmation', 'status'].indexOf(currentStep)
+                    ? 'text-slate-400'
+                    : 'text-slate-500'
+              }`}>
+                {step}
+              </span>
+            </div>
+          </div>
         </div>
       ))}
     </div>
@@ -73,7 +88,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
 
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-75 p-4">
-      <div className="bg-zinc-900 rounded-lg p-6 w-full max-w-xl max-h-[90vh] overflow-y-auto">
+      <div className="relative bg-zinc-900 rounded-lg p-12 w-full max-w-xl max-h-[90vh] overflow-y-auto">
         {renderStepIndicator()}
         
         {currentStep === 'form' && (
