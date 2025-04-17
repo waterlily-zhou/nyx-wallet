@@ -64,10 +64,10 @@ interface SafetyAnalysis {
 }
 
 interface GasEstimate {
-  gasPrice: string;
   feeAmount: number;
   feeCurrency: string;
   estimatedCostUSD: number;
+  gasLimit: string;
 }
 
 export default function TransactionConfirmation({ 
@@ -78,8 +78,13 @@ export default function TransactionConfirmation({
 }: TransactionConfirmationProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [safetyAnalysis, setSafetyAnalysis] = useState<SafetyAnalysis | null>(null);
-  const [selectedGasOption, setSelectedGasOption] = useState<'default' | 'sponsored' | 'usdc' | 'bundler'>('default');
-  const [gasEstimate, setGasEstimate] = useState<GasEstimate | null>(null);
+  const [selectedGasOption, setSelectedGasOption] = useState<'default' | 'usdc' | 'sponsored'>('default');
+  const [gasEstimate, setGasEstimate] = useState<{
+    feeAmount: number;
+    feeCurrency: string;
+    estimatedCostUSD: number;
+    gasLimit: string;
+  } | null>(null);
   const [isLoadingGas, setIsLoadingGas] = useState(false);
   const [gasError, setGasError] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
@@ -122,47 +127,45 @@ export default function TransactionConfirmation({
     checkTransactionSafety();
   }, [transactionDetails, walletAddress]);
 
-  useEffect(() => {
-    const fetchGasEstimates = async () => {
-      try {
-        setIsLoadingGas(true);
-        setGasError(null);
-        
-        const response = await fetch('/api/transaction/gas-estimate', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            to: transactionDetails.recipient,
-            value: transactionDetails.amount,
-            data: transactionDetails.calldata || '0x',
-            from: walletAddress,
-          })
-        });
+  const estimateGas = async () => {
+    if (!transactionDetails) return;
+    
+    setIsLoadingGas(true);
+    setGasError(null);
+    
+    try {
+      const response = await fetch('/api/transaction/gas-estimate', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: transactionDetails.recipient,
+          value: transactionDetails.amount,
+          data: transactionDetails.calldata || '0x',
+          from: walletAddress,
+          gasOption: selectedGasOption,
+        }),
+      });
 
-        if (!response.ok) {
-          const errorData = await response.json();
-          throw new Error(errorData.error || 'Failed to fetch gas estimates');
-        }
-
-        const data = await response.json();
-        setGasEstimate({
-          gasPrice: data.totalGasPrice,
-          feeAmount: data.feeAmount,
-          feeCurrency: data.feeCurrency,
-          estimatedCostUSD: data.estimatedCostUSD,
-        });
-      } catch (err) {
-        console.error('Error fetching gas estimates:', err);
-        setGasError(err instanceof Error ? err.message : 'Failed to fetch gas estimates');
-      } finally {
-        setIsLoadingGas(false);
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to estimate gas');
       }
-    };
 
-    fetchGasEstimates();
-  }, [transactionDetails, walletAddress]);
+      const estimate = await response.json();
+      setGasEstimate(estimate);
+    } catch (error) {
+      console.error('Gas estimation error:', error);
+      setGasError(error instanceof Error ? error.message : 'Failed to estimate gas');
+    } finally {
+      setIsLoadingGas(false);
+    }
+  };
+
+  useEffect(() => {
+    if (transactionDetails) {
+      estimateGas();
+    }
+  }, [selectedGasOption, transactionDetails]);
 
   const handleConfirm = () => {
     onConfirm(selectedGasOption);
@@ -648,21 +651,6 @@ export default function TransactionConfirmation({
             </div>
             
             <div className="space-y-3">
-              {/*               <div>
-                <label className="flex items-center space-x-2 text-sm">
-                  <input
-                    type="radio"
-                    name="gasOption"
-                    value="sponsored"
-                    checked={selectedGasOption === 'sponsored'}
-                    onChange={() => setSelectedGasOption('sponsored')}
-                    className="text-violet-600"
-                  />
-                  <span>Sponsored (Free)</span>
-                </label>
-                <p className="text-sm text-gray-400 ml-6">Transaction fees are covered for you</p>
-              </div> */}
-              
               <div>
                 <label className="flex items-center space-x-2 text-sm">
                   <input
@@ -675,7 +663,6 @@ export default function TransactionConfirmation({
                   />
                   <span>Pay with ETH</span>
                 </label>
-               {/*  <p className="text-sm text-gray-400 ml-6">Use ETH from your wallet to pay gas fees</p> */}
               </div>
               
               <div>
@@ -690,39 +677,36 @@ export default function TransactionConfirmation({
                   />
                   <span>Pay with USDC</span>
                 </label>
-                
               </div>
 
               {/* Gas Speed Options */}
-              {/* {selectedGasOption !== 'sponsored' && ( */}
-                <div className="mt-4 pt-4 border-t border-gray-700">
-                  <div className="flex justify-between items-center mb-3">
-                    {gasError && (
-                      <p className="text-xs text-red-400">{gasError}</p>
-                    )}
-                  </div>
-                  <div className="p-3 bg-gray-800/50 rounded-lg">
-                    {isLoadingGas ? (
-                      <div className="animate-pulse">
-                        <div className="h-4 bg-gray-700 rounded w-1/4 mb-2"></div>
-                        <div className="h-3 bg-gray-700 rounded w-1/3"></div>
-                      </div>
-                    ) : gasEstimate ? (
-                      <div className="text-sm">
-                        <div className="flex justify-between items-center">
-                          <span>Estimated Gas Fee</span>
-                          <div>
-                            <span className='mr-2'>{formatFeeAmount(gasEstimate.feeAmount, gasEstimate.feeCurrency)}</span>
-                            <span className="text-gray-400">{gasEstimate.estimatedCostUSD < 0.001 ? '(<$0.001)' : `($${gasEstimate.estimatedCostUSD.toFixed(4)})`}</span>
-                          </div>
-                        </div>
-                        <p className="text-xs text-gray-400 mt-1">Transaction will complete in a few seconds</p>
-                      </div>
-                    ) : null}
-                  </div>
-                  <p className="text-xs text-gray-400 mt-2">* Estimated fee based on current network conditions</p>
+              <div className="mt-4 pt-4 border-t border-gray-700">
+                <div className="flex justify-between items-center mb-3">
+                  {gasError && (
+                    <p className="text-xs text-red-400">{gasError}</p>
+                  )}
                 </div>
-             {/*  )} */}
+                <div className="p-3 bg-gray-800/50 rounded-lg">
+                  {isLoadingGas ? (
+                    <div className="animate-pulse">
+                      <div className="h-4 bg-gray-700 rounded w-1/4 mb-2"></div>
+                      <div className="h-3 bg-gray-700 rounded w-1/3"></div>
+                    </div>
+                  ) : gasEstimate ? (
+                    <div className="text-sm">
+                      <div className="flex justify-between items-center">
+                        <span>Estimated Gas Fee</span>
+                        <div>
+                          <span className='mr-2'>{formatFeeAmount(gasEstimate.feeAmount, gasEstimate.feeCurrency)}</span>
+                          <span className="text-gray-400">{gasEstimate.estimatedCostUSD < 0.001 ? '(<$0.001)' : `($${gasEstimate.estimatedCostUSD.toFixed(4)})`}</span>
+                        </div>
+                      </div>
+                      <p className="text-xs text-gray-400 mt-1">Transaction will complete in a few seconds</p>
+                    </div>
+                  ) : null}
+                </div>
+                <p className="text-xs text-gray-400 mt-2">* Estimated fee based on current network conditions</p>
+              </div>
             </div>
           </div>
 
