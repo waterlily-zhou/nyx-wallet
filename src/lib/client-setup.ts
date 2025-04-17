@@ -1,9 +1,12 @@
-import { createPublicClient, http, type Account, type PublicClient, fallback } from 'viem';
+import { createPublicClient, http, type Transport } from 'viem';
 import { baseSepolia } from 'viem/chains';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { createSmartAccountClient } from 'permissionless';
 import { privateKeyToAccount } from 'viem/accounts';
 import { toSafeSmartAccount } from 'permissionless/accounts';
+import type { SmartAccountClient, SmartAccountClientConfig } from 'permissionless';
+import type { UserOperation } from 'permissionless/types/userOperation';
+import type { Chain, PublicClient, Account, Transport as ViemTransport } from 'viem';
 
 // Constants
 export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' as const;
@@ -12,7 +15,6 @@ export const ENTRY_POINT_ADDRESS = '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789' 
 const SEPOLIA_RPC_URLS = [
   'https://sepolia.base.org',  // Primary Base Sepolia endpoint
   'https://base-sepolia-rpc.publicnode.com', // Base Sepolia public node
-  'https://sepolia.base.org',  // Listed again for redundancy
 ];
 
 export interface ClientSetup {
@@ -41,51 +43,35 @@ export function createOwnerAccount(privateKey: string): Account {
     return privateKeyToAccount(privateKey as `0x${string}`);
 }
 
-// Create public client for Sepolia with fallback providers
+// Create public client for Sepolia
 export function createPublicClientForSepolia(): PublicClient {
-    // Using type assertion to resolve TypeScript errors
     return createPublicClient({
         chain: baseSepolia,
-        transport: fallback(
-          SEPOLIA_RPC_URLS.map(url => http(url, {
-            timeout: 10000, // 10 seconds
+        transport: http(SEPOLIA_RPC_URLS[0], {
+            timeout: 10000,
             retryCount: 3,
-            retryDelay: 1000, // 1 second
+            retryDelay: 1000,
             batch: {
-              batchSize: 4, // Limit batch size to reduce rate limits
+                batchSize: 4
             }
-          })),
-          { 
-            rank: true,
-            retryCount: 5,
-            retryDelay: 1500
-          }
-        )
-    }) as PublicClient;
+        })
+    });
 }
 
 // Create public client for active chain
 export function createChainPublicClient(): PublicClient {
     const activeChain = getActiveChain();
-    // Using type assertion to resolve TypeScript errors
     return createPublicClient({
         chain: activeChain.chain,
-        transport: fallback(
-          SEPOLIA_RPC_URLS.map(url => http(url, {
-            timeout: 10000, // 10 seconds
+        transport: http(SEPOLIA_RPC_URLS[0], {
+            timeout: 10000,
             retryCount: 3,
-            retryDelay: 1000, // 1 second
+            retryDelay: 1000,
             batch: {
-              batchSize: 4, // Limit batch size to reduce rate limits
+                batchSize: 4
             }
-          })),
-          { 
-            rank: true,
-            retryCount: 5,
-            retryDelay: 1500
-          }
-        )
-    }) as PublicClient;
+        })
+    });
 }
 
 // Create Pimlico client instance with updated parameters
@@ -113,29 +99,35 @@ export async function createSafeSmartAccount(publicClient: PublicClient, signer:
   });
 }
 
-// Create smart account client with paymaster
+// Create a Smart Account Client with Paymaster
 export function createSmartAccountClientWithPaymaster(
-  smartAccount: any,
-  pimlicoClient: any,
-  pimlicoUrl: string
-) {
-  // Using any type to bypass TypeScript errors
-  const config: any = {
-    account: smartAccount,
-    chain: baseSepolia,
-    bundlerTransport: http(pimlicoUrl)
-  };
-  
-  // Add middleware for sponsorUserOperation if pimlicoClient is available
-  if (pimlicoClient && pimlicoClient.sponsorUserOperation) {
-    config.middleware = {
-      sponsorUserOperation: async (args: any) => {
-        return pimlicoClient.sponsorUserOperation(args);
+  smartAccount: Awaited<ReturnType<typeof toSafeSmartAccount>>,
+  pimlicoClient: ReturnType<typeof createPimlicoClient>,
+  paymasterUrl: string
+): SmartAccountClient {
+  try {
+    return createSmartAccountClient({
+      account: smartAccount,
+      chain: baseSepolia,
+      bundlerTransport: http(paymasterUrl),
+      middleware: {
+        sponsorUserOperation: async (args: { userOperation: UserOperation }) => {
+          try {
+            const sponsored = await pimlicoClient.sponsorUserOperation({
+              userOperation: args.userOperation
+            });
+            return sponsored;
+          } catch (err) {
+            console.error('Sponsorship error:', err);
+            return { paymasterAndData: '0x' };
+          }
+        }
       }
-    };
+    });
+  } catch (error) {
+    console.error('Error creating Smart Account Client:', error);
+    throw error;
   }
-  
-  return createSmartAccountClient(config);
 }
 
 // Validate environment variables

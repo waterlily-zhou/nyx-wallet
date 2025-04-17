@@ -1,6 +1,9 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
+import { startAuthentication } from '@simplewebauthn/browser';
+import { getDeviceKey } from '@/lib/client/secure-storage';
+import type { Hex } from 'viem';
 
 interface TransactionDetails {
   recipient: string;
@@ -28,14 +31,67 @@ export default function TransactionStatus({
   gasOption,
   onFinish 
 }: TransactionStatusProps) {
-  const [isSubmitting, setIsSubmitting] = useState(true);
+  const [status, setStatus] = useState<'submitting' | 'authenticating' | 'success' | 'error'>('submitting');
   const [result, setResult] = useState<TransactionResult | null>(null);
   
+  // Create refs outside useEffect to persist across re-renders
+  const transactionInProgress = useRef<string | null>(null);
+  const isTransactionActive = useRef(false);
+  const isMounted = useRef(true);
+  
+  // Generate transaction ID once on mount
+  const transactionId = useRef(`${walletAddress}-${Date.now()}`);
+  
+  // Handle component mount/unmount
   useEffect(() => {
+    console.log('🔄 Component mounted');
+    isMounted.current = true;
+    return () => {
+      console.log('🔄 Component unmounting');
+      isMounted.current = false;
+      // Clean up any ongoing transaction
+      if (transactionInProgress.current) {
+        console.log('🧹 Cleaning up transaction on unmount:', transactionInProgress.current);
+        transactionInProgress.current = null;
+        isTransactionActive.current = false;
+      }
+    };
+  }, []); // Empty dependency array since this only handles mount/unmount
+
+  // Safe state setter that only updates if component is mounted
+  const safeSetState = (setter: Function, value: any) => {
+    if (isMounted.current) {
+      setter(value);
+    }
+  };
+  
+  // Separate useEffect for transaction logic
+  useEffect(() => {
+    // Don't start a new transaction if one is already in progress
+    if (transactionInProgress.current || isTransactionActive.current) {
+      console.log('🔄 Transaction already in progress, skipping:', transactionInProgress.current);
+      return;
+    }
+
+    const currentTransactionId = transactionId.current;
+    
     const sendTransaction = async () => {
+      // Set transaction as active immediately
+      isTransactionActive.current = true;
+      transactionInProgress.current = currentTransactionId;
+
+      console.log('🚀 Starting transaction flow:', {
+        transactionId: currentTransactionId,
+        walletAddress,
+        recipient: transactionDetails.recipient,
+        amount: transactionDetails.amount,
+        gasOption
+      });
+
       try {
-        // Send the transaction to the API
-        const response = await fetch('/api/transaction/send', {
+        // 1. Get WebAuthn challenge and device key in a single request
+        console.log('📤 Requesting transaction challenge...');
+        const challengeResponse = await fetch('/api/auth/transaction-challenge', {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json'
@@ -44,9 +100,63 @@ export default function TransactionStatus({
             to: transactionDetails.recipient,
             value: transactionDetails.amount,
             data: '0x', // Simple ETH transfer
-            gasPaymentMethod: gasOption
+            includeDeviceKey: true
           })
         });
+
+        if (!isMounted.current) {
+          console.log('⚠️ Component unmounted during challenge request');
+          return;
+        }
+
+        if (!challengeResponse.ok) {
+          throw new Error('Failed to get transaction challenge');
+        }
+
+        const { challenge, options, deviceKeyId } = await challengeResponse.json();
+        
+        // Set status before starting WebAuthn
+        safeSetState(setStatus, 'authenticating');
+
+        // 2. Get WebAuthn signature
+        let webAuthnResponse;
+        try {
+          webAuthnResponse = await startAuthentication({ optionsJSON: options });
+          
+          if (!isMounted.current) {
+            console.log('⚠️ Component unmounted during WebAuthn');
+            return;
+          }
+        } catch (webAuthnError) {
+          if (isMounted.current) {
+            console.error('❌ WebAuthn authentication failed:', webAuthnError);
+          }
+          throw webAuthnError;
+        }
+
+        // Set status back to submitting for transaction
+        safeSetState(setStatus, 'submitting');
+
+        // 3. Send the transaction
+        const response = await fetch('/api/transaction/send', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            to: transactionDetails.recipient,
+            value: transactionDetails.amount,
+            data: '0x',
+            gasPaymentMethod: gasOption,
+            webAuthnResponse,
+            transactionChallenge: challenge
+          })
+        });
+
+        if (!isMounted.current) {
+          console.log('⚠️ Component unmounted during transaction send');
+          return;
+        }
 
         const data = await response.json();
         
@@ -54,43 +164,65 @@ export default function TransactionStatus({
           throw new Error(data.error || 'Transaction failed to send');
         }
 
-        setResult({
+        safeSetState(setStatus, 'success');
+        safeSetState(setResult, {
           success: true,
           userOpHash: data.data?.userOpHash,
           explorerUrl: data.data?.explorerUrl
         });
-      } catch (err) {
-        console.error('Error sending transaction:', err);
-        setResult({
-          success: false,
-          error: err instanceof Error ? err.message : 'Failed to send transaction'
-        });
+
+      } catch (error) {
+        if (isMounted.current) {
+          console.error('❌ Transaction error:', error);
+          safeSetState(setStatus, 'error');
+          safeSetState(setResult, {
+            success: false,
+            error: error instanceof Error ? error.message : 'Failed to send transaction'
+          });
+        }
       } finally {
-        setIsSubmitting(false);
+        if (isMounted.current) {
+          console.log('🧹 Cleaning up transaction state:', currentTransactionId);
+          transactionInProgress.current = null;
+          isTransactionActive.current = false;
+        }
       }
     };
 
-    sendTransaction();
-  }, [transactionDetails, gasOption]);
-
-  const handleViewOnEtherscan = () => {
-    if (result?.explorerUrl) {
-      window.open(result.explorerUrl, '_blank');
+    // Start transaction if mounted
+    if (isMounted.current) {
+      sendTransaction();
     }
-  };
 
+    // Cleanup function
+    return () => {
+      if (transactionInProgress.current === currentTransactionId) {
+        console.log('🔄 Cleaning up specific transaction:', currentTransactionId);
+        transactionInProgress.current = null;
+        isTransactionActive.current = false;
+      }
+    };
+  }, [walletAddress, transactionDetails.recipient, transactionDetails.amount, gasOption]); // Include all dependencies
+
+  // Update the render logic to use the new status state
   return (
     <div className="w-full max-w-lg mx-auto text-center">
-      {isSubmitting ? (
+      {status === 'submitting' || status === 'authenticating' ? (
         // Loading state
         <div className="space-y-8">
-          <h2 className="text-3xl font-bold">Processing Transaction</h2>
+          <h2 className="text-3xl font-bold">
+            {status === 'authenticating' ? 'Waiting for Authentication' : 'Processing Transaction'}
+          </h2>
           <div className="flex justify-center">
             <div className="animate-spin rounded-full h-20 w-20 border-b-2 border-violet-500"></div>
           </div>
-          <p className="text-gray-300">Your transaction is being processed. Please wait...</p>
+          <p className="text-gray-300">
+            {status === 'authenticating' 
+              ? 'Please complete the authentication request...'
+              : 'Your transaction is being processed. Please wait...'}
+          </p>
         </div>
-      ) : result?.success ? (
+      ) : status === 'success' ? (
         // Success state
         <div className="space-y-8">
           <h2 className="text-3xl font-bold">Transaction completed!</h2>
@@ -105,21 +237,25 @@ export default function TransactionStatus({
             It will take a few minutes to be confirmed on chain.
           </p>
           
-          <div className="p-4 bg-gray-900 rounded-lg inline-block mx-auto text-center mt-4">
-            <p className="text-sm text-gray-400 mb-2">Transaction Hash:</p>
-            <p className="font-mono text-sm break-all">{result.userOpHash}</p>
-          </div>
+          {result?.userOpHash && (
+            <div className="p-4 bg-gray-900 rounded-lg inline-block mx-auto text-center mt-4">
+              <p className="text-sm text-gray-400 mb-2">Transaction Hash:</p>
+              <p className="font-mono text-sm break-all">{result.userOpHash}</p>
+            </div>
+          )}
           
-          <div>
-            <button
-              onClick={handleViewOnEtherscan}
-              className="text-violet-400 hover:text-violet-300 flex items-center justify-center mx-auto"
-            >
-              <span>Check on</span>
-              <span className="ml-1">→</span>
-              <span className="ml-1">Etherscan</span>
-            </button>
-          </div>
+          {result?.explorerUrl && (
+            <div>
+              <button
+                onClick={() => window.open(result.explorerUrl, '_blank')}
+                className="text-violet-400 hover:text-violet-300 flex items-center justify-center mx-auto"
+              >
+                <span>Check on</span>
+                <span className="ml-1">→</span>
+                <span className="ml-1">Etherscan</span>
+              </button>
+            </div>
+          )}
           
           <button
             onClick={onFinish}

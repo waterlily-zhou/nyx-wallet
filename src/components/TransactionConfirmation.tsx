@@ -153,6 +153,7 @@ export default function TransactionConfirmation({
 
       const estimate = await response.json();
       setGasEstimate(estimate);
+      console.log('Gas estimate:', estimate);
     } catch (error) {
       console.error('Gas estimation error:', error);
       setGasError(error instanceof Error ? error.message : 'Failed to estimate gas');
@@ -191,7 +192,8 @@ export default function TransactionConfirmation({
     return 'text-red-400';
   };
 
-  const formatFeeAmount = (amount: number, currency: string): string => {
+  const formatFeeAmount = (amount: number | undefined, currency: string): string => {
+    if (amount === undefined) return `0 ${currency}`;
     if (amount < 0.001) {
       return `<0.001 ${currency}`;
     }
@@ -697,8 +699,12 @@ export default function TransactionConfirmation({
                       <div className="flex justify-between items-center">
                         <span>Estimated Gas Fee</span>
                         <div>
-                          <span className='mr-2'>{formatFeeAmount(gasEstimate.feeAmount, gasEstimate.feeCurrency)}</span>
-                          <span className="text-gray-400">{gasEstimate.estimatedCostUSD < 0.001 ? '(<$0.001)' : `($${gasEstimate.estimatedCostUSD.toFixed(4)})`}</span>
+                          <span className='mr-2'>{formatFeeAmount(gasEstimate?.feeAmount, selectedGasOption === 'usdc' ? 'USDC' : 'ETH')}</span>
+                          <span className="text-gray-400">
+                            {gasEstimate?.estimatedCostUSD === undefined ? '($0.00)' :
+                             gasEstimate.estimatedCostUSD < 0.001 ? '(<$0.001)' : 
+                             `($${gasEstimate.estimatedCostUSD.toFixed(4)})`}
+                          </span>
                         </div>
                       </div>
                       <p className="text-xs text-gray-400 mt-1">Transaction will complete in a few seconds</p>

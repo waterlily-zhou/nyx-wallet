@@ -1,13 +1,15 @@
-import { type Address, parseEther } from 'viem';
-import { createUserOperation, signUserOperation } from '@zerodev/sdk';
+import { type Address, parseEther, encodeFunctionData } from 'viem';
+import { signUserOperation } from '@zerodev/sdk';
 import { createHash } from 'crypto';
 import { bundlerClient, paymasterClient } from '@/lib/client-setup';
-import { UserOperationStruct } from 'permissionless';
+import { type UserOperation } from '@permissionless/types';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { createSmartAccountClient } from 'permissionless';
 import { http } from 'viem';
-import { baseSepolia } from 'viem/chains';
+import { base } from 'viem/chains';
+import { createUserOperation } from '@zerodev/sdk';
 import { encodeUserOperation, keccak256 } from 'permissionless/utils';
+import { signMessage } from 'viem/accounts';
 
 export async function sendTransaction(
   deviceKey: string,
@@ -18,95 +20,126 @@ export async function sendTransaction(
   data: string = '0x'
 ) {
   try {
+    // Get the current nonce
     const nonce = await bundlerClient.getUserOperationCount({
-      entryPoint: process.env.ENTRYPOINT_ADDRESS!,
+      entryPoint: process.env.ENTRYPOINT_ADDRESS as Address,
       sender: from,
     });
 
-    const userOperation = {
+    // Encode the transfer calldata
+    const callData = encodeFunctionData({
+      abi: [{
+        type: 'function',
+        name: 'execute',
+        inputs: [
+          { type: 'address', name: 'to' },
+          { type: 'uint256', name: 'value' },
+          { type: 'bytes', name: 'data' }
+        ],
+        outputs: [{ type: 'bytes', name: 'result' }],
+        stateMutability: 'payable'
+      }],
+      args: [to, value, data as `0x${string}`]
+    });
+
+    // Create the user operation
+    const userOperation: UserOperation = {
       sender: from,
-      nonce,
-      initCode: '0x',
-      callData: data,
+      nonce: nonce,
+      initCode: '0x' as `0x${string}`,
+      callData: callData,
       callGasLimit: BigInt(100000),
       verificationGasLimit: BigInt(100000),
       preVerificationGas: BigInt(100000),
       maxFeePerGas: parseEther('0.000000001'),
       maxPriorityFeePerGas: parseEther('0.000000001'),
-      paymasterAndData: '0x',
-      signature: '0x',
+      paymasterAndData: '0x' as `0x${string}`,
+      signature: '0x' as `0x${string}`,
     };
 
     // Get paymaster data
-    const paymasterAndData = await paymasterClient.sponsorUserOperation({
+    const sponsorResult = await paymasterClient.sponsorUserOperation({
       userOperation,
-      entryPoint: process.env.ENTRYPOINT_ADDRESS!,
+      entryPoint: process.env.ENTRYPOINT_ADDRESS as Address,
     });
 
-    userOperation.paymasterAndData = paymasterAndData;
+    userOperation.paymasterAndData = sponsorResult.paymasterAndData;
 
-    // Sign the user operation
-    // TODO: Implement signing logic
+    // Generate the final private key from device and server keys
     const finalKeyHex = createHash('sha256')
-    .update(deviceKey + serverKey)
-    .digest('hex');
-    const finalPrivateKey = `0x${finalKeyHex}`;
+      .update(deviceKey + serverKey)
+      .digest('hex');
+    const finalPrivateKey = `0x${finalKeyHex}` as `0x${string}`;
+
+    // Sign the user operation hash
+    const userOpHash = await bundlerClient.getUserOperationHash({
+      userOperation,
+      entryPoint: process.env.ENTRYPOINT_ADDRESS as Address,
+    });
+    const signature = await signMessage({
+      message: { raw: userOpHash },
+      privateKey: finalPrivateKey,
+    });
+    userOperation.signature = signature;
 
     // Send the user operation
-    const userOpHash = await bundlerClient.sendUserOperation({
+    const hash = await bundlerClient.sendUserOperation({
       userOperation,
-      entryPoint: process.env.ENTRYPOINT_ADDRESS!,
+      entryPoint: process.env.ENTRYPOINT_ADDRESS as Address,
     });
 
-    return userOpHash;
+    return hash;
   } catch (error) {
     console.error('Error sending transaction:', error);
     throw error;
   }
-} 
+}
 
 export async function createUserOpWithoutSignature(params: {
   to: `0x${string}`,
   value: string,
   data: `0x${string}`,
   userId?: string,
-}) {
-  // 1. Connect to Pimlico
+}): Promise<UserOperation> {
+  // Connect to Pimlico
   const pimlicoClient = createPimlicoClient({
-    transport: http('https://api.pimlico.io/v1/sepolia/rpc'),
-    apiKey: process.env.PIMLICO_API_KEY || '',
+    chain: base,
+    transport: http(process.env.RPC_URL || ''),
   });
+
+  // Create smart account client
   const sac = createSmartAccountClient({
-    chain: baseSepolia,
-    transport: http('https://api.pimlico.io/v1/sepolia/rpc'),
-    account: undefined, // This will be set later with the actual account
+    chain: base,
+    transport: http(process.env.RPC_URL || ''),
+    account: undefined,
   });
 
-  // 2. Construct a partial userOp (without signature)
-  const sender = '0xyourSmartAccount'; // TODO: Get from userId
-  const partial: Partial<UserOperationStruct> = {
-    sender: sender as `0x${string}`,
-    nonce: await pimlicoClient.getUserOperationCount({
-      entryPoint: '0x5FF137D4b0FDCD49DcA30c7CF57E578a026d2789',
-      sender: sender as `0x${string}`,
-    }),
-    initCode: '0x',
-    callData: '0x', // This should be encoded using sac.encodeExecute
-    callGasLimit: 500000n,
-    verificationGasLimit: 300000n,
-    preVerificationGas: 21000n,
-    maxFeePerGas: 1_000000000n,
-    maxPriorityFeePerGas: 1_000000000n,
-    paymasterAndData: '0x',
-    signature: '0x',
+  // Get the nonce
+  const nonce = await pimlicoClient.getUserOperationCount({
+    entryPoint: process.env.ENTRYPOINT_ADDRESS as Address,
+    sender: (params.userId || '0x') as Address,
+  });
+
+  // Construct the user operation
+  const userOperation: UserOperation = {
+    sender: (params.userId || '0x') as Address,
+    nonce: nonce,
+    initCode: '0x' as `0x${string}`,
+    callData: await sac.account?.encodeCallData({
+      to: params.to,
+      value: BigInt(params.value),
+      data: params.data,
+    }) || '0x',
+    callGasLimit: BigInt(500000),
+    verificationGasLimit: BigInt(300000),
+    preVerificationGas: BigInt(21000),
+    maxFeePerGas: parseEther('0.000000001'),
+    maxPriorityFeePerGas: parseEther('0.000000001'),
+    paymasterAndData: '0x' as `0x${string}`,
+    signature: '0x' as `0x${string}`,
   };
-  const userOp = partial as UserOperationStruct;
 
-  // 3. Calculate userOpHash
-  const encoded = encodeUserOperation(userOp, false); // false -> don't include signature
-  const userOpHash = keccak256(encoded);
-
-  return { userOp, userOpHash };
+  return userOperation;
 }
 
 export async function finalizeAndSendUserOp(userOp: UserOperationStruct): Promise<`0x${string}`> {

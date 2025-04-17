@@ -1,5 +1,5 @@
 import { NextResponse } from 'next/server';
-import { getPublicClient } from '@/lib/utils/viem-client';
+import { createPublicClientForSepolia as getPublicClient } from '@/lib/client-setup';
 import { getEthPrice } from '@/lib/utils/price-feed';
 
 export async function POST(request: Request) {
