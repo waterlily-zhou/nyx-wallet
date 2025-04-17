@@ -63,6 +63,13 @@ interface SafetyAnalysis {
   }
 }
 
+interface GasEstimate {
+  gasPrice: string;
+  feeAmount: number;
+  feeCurrency: string;
+  estimatedCostUSD: number;
+}
+
 export default function TransactionConfirmation({ 
   walletAddress, 
   transactionDetails, 
@@ -71,16 +78,18 @@ export default function TransactionConfirmation({
 }: TransactionConfirmationProps) {
   const [isLoading, setIsLoading] = useState(true);
   const [safetyAnalysis, setSafetyAnalysis] = useState<SafetyAnalysis | null>(null);
-  const [selectedGasOption, setSelectedGasOption] = useState<'default' | 'sponsored' | 'usdc' | 'bundler'>('sponsored');
-  const [error, setError] = useState<string | null>(null);
+  const [selectedGasOption, setSelectedGasOption] = useState<'default' | 'sponsored' | 'usdc' | 'bundler'>('default');
+  const [gasEstimate, setGasEstimate] = useState<GasEstimate | null>(null);
+  const [isLoadingGas, setIsLoadingGas] = useState(false);
+  const [gasError, setGasError] = useState<string | null>(null);
+  const [aiError, setAiError] = useState<string | null>(null);
 
   useEffect(() => {
     const checkTransactionSafety = async () => {
       try {
         setIsLoading(true);
-        setError(null);
+        setAiError(null);
         
-        // Use our new comprehensive safety API
         const safetyResponse = await fetch('/api/transaction/safety', {
           method: 'POST',
           headers: {
@@ -101,23 +110,58 @@ export default function TransactionConfirmation({
         }
 
         const safetyResult = await safetyResponse.json();
-        console.log('Safety analysis request:', {
-          to: transactionDetails.recipient,
-          value: transactionDetails.amount,
-          from: walletAddress,
-          network: transactionDetails.network
-        });
-        console.log('Safety analysis:', safetyResult);
         setSafetyAnalysis(safetyResult);
       } catch (err) {
         console.error('Error checking transaction safety:', err);
-        setError(err instanceof Error ? err.message : 'Failed to analyze transaction safety');
+        setAiError(err instanceof Error ? err.message : 'Failed to analyze transaction safety');
       } finally {
         setIsLoading(false);
       }
     };
 
     checkTransactionSafety();
+  }, [transactionDetails, walletAddress]);
+
+  useEffect(() => {
+    const fetchGasEstimates = async () => {
+      try {
+        setIsLoadingGas(true);
+        setGasError(null);
+        
+        const response = await fetch('/api/transaction/gas-estimate', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json'
+          },
+          body: JSON.stringify({
+            to: transactionDetails.recipient,
+            value: transactionDetails.amount,
+            data: transactionDetails.calldata || '0x',
+            from: walletAddress,
+          })
+        });
+
+        if (!response.ok) {
+          const errorData = await response.json();
+          throw new Error(errorData.error || 'Failed to fetch gas estimates');
+        }
+
+        const data = await response.json();
+        setGasEstimate({
+          gasPrice: data.totalGasPrice,
+          feeAmount: data.feeAmount,
+          feeCurrency: data.feeCurrency,
+          estimatedCostUSD: data.estimatedCostUSD,
+        });
+      } catch (err) {
+        console.error('Error fetching gas estimates:', err);
+        setGasError(err instanceof Error ? err.message : 'Failed to fetch gas estimates');
+      } finally {
+        setIsLoadingGas(false);
+      }
+    };
+
+    fetchGasEstimates();
   }, [transactionDetails, walletAddress]);
 
   const handleConfirm = () => {
@@ -142,6 +186,13 @@ export default function TransactionConfirmation({
     if (score >= 80) return 'text-green-400';
     if (score >= 60) return 'text-yellow-400';
     return 'text-red-400';
+  };
+
+  const formatFeeAmount = (amount: number, currency: string): string => {
+    if (amount < 0.001) {
+      return `<0.001 ${currency}`;
+    }
+    return `${amount.toFixed(4)} ${currency}`;
   };
 
   return (
@@ -186,9 +237,9 @@ export default function TransactionConfirmation({
           {/* AI Analysis Card */}
           <div className="border border-gray-700 rounded-lg p-4">
             <h3 className="mb-4">AI Analysis</h3>
-            {error ? (
+            {aiError ? (
               <div className="p-3 bg-red-900/50 border border-red-600 rounded-md text-sm">
-                {error}
+                {aiError}
               </div>
             ) : (
               <div className="space-y-4">
@@ -591,9 +642,13 @@ export default function TransactionConfirmation({
 
           {/* Gas Options Card */}
           <div className="border border-gray-700 rounded-lg p-4">
-            <h3 className="mb-4">Gas options</h3>
+            <div className='mb-4'>
+              <span className="">Gas options</span>
+              <span className="text-sm text-gray-400 ml-2">(Choose a token type for gas fees)</span>
+            </div>
+            
             <div className="space-y-3">
-              <div>
+              {/*               <div>
                 <label className="flex items-center space-x-2 text-sm">
                   <input
                     type="radio"
@@ -606,7 +661,7 @@ export default function TransactionConfirmation({
                   <span>Sponsored (Free)</span>
                 </label>
                 <p className="text-sm text-gray-400 ml-6">Transaction fees are covered for you</p>
-              </div>
+              </div> */}
               
               <div>
                 <label className="flex items-center space-x-2 text-sm">
@@ -620,7 +675,7 @@ export default function TransactionConfirmation({
                   />
                   <span>Pay with ETH</span>
                 </label>
-                <p className="text-sm text-gray-400 ml-6">Use ETH from your wallet to pay gas fees</p>
+               {/*  <p className="text-sm text-gray-400 ml-6">Use ETH from your wallet to pay gas fees</p> */}
               </div>
               
               <div>
@@ -635,37 +690,37 @@ export default function TransactionConfirmation({
                   />
                   <span>Pay with USDC</span>
                 </label>
-                <p className="text-sm text-gray-400 ml-6">Use USDC from your wallet to pay gas fees</p>
+                
               </div>
 
               {/* Gas Speed Options */}
               {/* {selectedGasOption !== 'sponsored' && ( */}
                 <div className="mt-4 pt-4 border-t border-gray-700">
-                  <p className="text-sm mb-3">Transaction Speed</p>
-                  <div className="grid grid-cols-3 gap-2">
-                    <button
-                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
-                    >
-                      <div className="font-medium">Slow</div>
-                      <div className="text-gray-400">~5 min</div>
-                      <div className="mt-1">$0.50</div>
-                    </button>
-                    <button
-                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
-                    >
-                      <div className="font-medium">Normal</div>
-                      <div className="text-gray-400">~2 min</div>
-                      <div className="mt-1">$0.75</div>
-                    </button>
-                    <button
-                      className="p-2 text-xs border border-gray-700 rounded-lg hover:bg-gray-800 focus:ring-2 focus:ring-violet-500 focus:outline-none"
-                    >
-                      <div className="font-medium">Fast</div>
-                      <div className="text-gray-400">~30 sec</div>
-                      <div className="mt-1">$1.00</div>
-                    </button>
+                  <div className="flex justify-between items-center mb-3">
+                    {gasError && (
+                      <p className="text-xs text-red-400">{gasError}</p>
+                    )}
                   </div>
-                  <p className="text-xs text-gray-400 mt-2">* Estimated fees and times</p>
+                  <div className="p-3 bg-gray-800/50 rounded-lg">
+                    {isLoadingGas ? (
+                      <div className="animate-pulse">
+                        <div className="h-4 bg-gray-700 rounded w-1/4 mb-2"></div>
+                        <div className="h-3 bg-gray-700 rounded w-1/3"></div>
+                      </div>
+                    ) : gasEstimate ? (
+                      <div className="text-sm">
+                        <div className="flex justify-between items-center">
+                          <span>Estimated Gas Fee</span>
+                          <div>
+                            <span className='mr-2'>{formatFeeAmount(gasEstimate.feeAmount, gasEstimate.feeCurrency)}</span>
+                            <span className="text-gray-400">{gasEstimate.estimatedCostUSD < 0.001 ? '(<$0.001)' : `($${gasEstimate.estimatedCostUSD.toFixed(4)})`}</span>
+                          </div>
+                        </div>
+                        <p className="text-xs text-gray-400 mt-1">Transaction will complete in a few seconds</p>
+                      </div>
+                    ) : null}
+                  </div>
+                  <p className="text-xs text-gray-400 mt-2">* Estimated fee based on current network conditions</p>
                 </div>
              {/*  )} */}
             </div>
