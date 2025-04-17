@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import TransactionForm from './TransactionForm';
 import TransactionConfirmation from './TransactionConfirmation';
 import TransactionStatus from './TransactionStatus';
@@ -11,15 +11,61 @@ interface TransactionFlowProps {
 }
 
 type TransactionStep = 'create' | 'confirm' | 'complete';
+type GasOption = 'default' | 'sponsored' | 'usdc' | 'bundler';
+
+interface TransactionDetails {
+  recipient: string;
+  amount: string;
+  network: string;
+}
+
+// Custom hook to create memoized TransactionStatus component
+function useTransactionStatus() {
+  return useMemo(() => {
+    const TransactionStatusWrapper = ({
+      walletAddress,
+      transactionDetails,
+      gasOption,
+      onFinish,
+      show
+    }: {
+      walletAddress: string;
+      transactionDetails: TransactionDetails;
+      gasOption: GasOption;
+      onFinish: () => void;
+      show: boolean;
+    }) => {
+      // Only render if show is true
+      if (!show) return null;
+
+      return (
+        <TransactionStatus
+          walletAddress={walletAddress}
+          transactionDetails={transactionDetails}
+          gasOption={gasOption}
+          onFinish={onFinish}
+        />
+      );
+    };
+
+    return React.memo(TransactionStatusWrapper);
+  }, []); // Empty deps since this should never change
+}
 
 export default function TransactionFlow({ walletAddress, onClose }: TransactionFlowProps) {
   const [currentStep, setCurrentStep] = useState<TransactionStep>('create');
-  const [transactionDetails, setTransactionDetails] = useState<{
-    recipient: string;
-    amount: string;
-    network: string;
-  } | null>(null);
-  const [gasOption, setGasOption] = useState<'default' | 'sponsored' | 'usdc' | 'bundler'>('sponsored');
+  const [transactionDetails, setTransactionDetails] = useState<TransactionDetails | null>(null);
+  const [gasOption, setGasOption] = useState<GasOption>('default');
+
+  // Get memoized TransactionStatus component
+  const MemoizedTransactionStatus = useTransactionStatus();
+
+  // Memoize transaction details to prevent unnecessary re-renders
+  const stableTransactionDetails = useMemo(() => ({
+    recipient: transactionDetails?.recipient || '',
+    amount: transactionDetails?.amount || '',
+    network: transactionDetails?.network || ''
+  }), [transactionDetails?.recipient, transactionDetails?.amount, transactionDetails?.network]);
 
   // Step indicator dots
   const renderStepIndicator = () => (
@@ -71,7 +117,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
   };
 
   // Handle confirmation
-  const handleConfirmation = (selectedGasOption: 'default' | 'sponsored' | 'usdc' | 'bundler') => {
+  const handleConfirmation = (selectedGasOption: GasOption) => {
     setGasOption(selectedGasOption);
     setCurrentStep('complete');
   };
@@ -91,6 +137,17 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
       <div className="relative bg-zinc-900 rounded-lg p-12 w-full max-w-xl max-h-[90vh] overflow-y-auto">
         {renderStepIndicator()}
         
+        {/* Memoized TransactionStatus that won't unmount */}
+        {transactionDetails && (
+          <MemoizedTransactionStatus
+            walletAddress={walletAddress}
+            transactionDetails={stableTransactionDetails}
+            gasOption={gasOption}
+            onFinish={handleFinishTransaction}
+            show={currentStep === 'complete'}
+          />
+        )}
+        
         {currentStep === 'create' && (
           <TransactionForm 
             walletAddress={walletAddress} 
@@ -101,30 +158,20 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
         {currentStep === 'confirm' && transactionDetails && (
           <TransactionConfirmation 
             walletAddress={walletAddress}
-            transactionDetails={transactionDetails}
+            transactionDetails={stableTransactionDetails}
             onConfirm={handleConfirmation}
             onBack={handleBackToForm}
-          />
-        )}
-        
-        {currentStep === 'complete' && transactionDetails && (
-          <TransactionStatus 
-            walletAddress={walletAddress}
-            transactionDetails={transactionDetails}
-            gasOption={gasOption}
-            onFinish={handleFinishTransaction}
           />
         )}
 
         {/* Close button - only visible on first two steps */}
         {currentStep !== 'complete' && (
-          <button 
+          <button
             onClick={onClose}
-            className="absolute top-4 right-4 text-gray-400 hover:text-white"
-            aria-label="Close"
+            className="absolute top-4 right-4 text-gray-400 hover:text-gray-300"
           >
             <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
+              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12" />
             </svg>
           </button>
         )}
