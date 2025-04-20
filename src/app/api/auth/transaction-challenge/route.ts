@@ -50,12 +50,38 @@ export async function POST(request: NextRequest) {
       Buffer.from(transactionData)
     ]);
     
-    const challengeBase64 = combinedChallenge.toString('base64url');
+    // Debug logging for challenge creation
+    console.log('🔍 Challenge Creation:', {
+      randomBytesLength: randomBytes.length,
+      transactionDataLength: Buffer.from(transactionData).length,
+      combinedChallengeLength: combinedChallenge.length
+    });
+    
+    // Convert to base64url format that matches WebAuthn's encoding
+    // First convert to base64
+    const challengeBase64 = combinedChallenge.toString('base64');
+    
+    // Then convert to base64url by replacing characters
+    const challengeBase64url = challengeBase64
+      .replace(/\+/g, '-')
+      .replace(/\//g, '_')
+      .replace(/=/g, '');
+
+    console.log('🔍 Challenge Encoding:', {
+      rawLength: combinedChallenge.length,
+      base64Length: challengeBase64.length,
+      base64urlLength: challengeBase64url.length,
+      base64Sample: `${challengeBase64.substring(0, 10)}...${challengeBase64.substring(challengeBase64.length - 10)}`,
+      base64urlSample: `${challengeBase64url.substring(0, 10)}...${challengeBase64url.substring(challengeBase64url.length - 10)}`,
+      containsPlus: challengeBase64url.includes('+'),
+      containsSlash: challengeBase64url.includes('/'),
+      containsEquals: challengeBase64url.includes('=')
+    });
 
     // Generate authentication options
     const options: PublicKeyCredentialRequestOptionsJSON = await generateAuthenticationOptions({
       rpID,
-      challenge: challengeBase64,
+      challenge: challengeBase64url,
       allowCredentials: [{
         id: authenticator.credential_id,
         transports: ['internal'] as AuthenticatorTransportFuture[]
@@ -64,8 +90,16 @@ export async function POST(request: NextRequest) {
       timeout: 60000
     });
 
+    // Log final options and challenge
+    console.log('🔍 Final WebAuthn Options:', {
+      challenge: options.challenge.substring(0, 10) + '...',
+      allowCredentials: options.allowCredentials,
+      rpID,
+      timeout: options.timeout
+    });
+
     // Store challenge and transaction data in cookies for verification
-    cookieStore.set('txChallenge', challengeBase64, {
+    cookieStore.set('txChallenge', challengeBase64url, {
       httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
       sameSite: 'strict',
@@ -81,7 +115,7 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({
       success: true,
-      challenge: challengeBase64,
+      challenge: challengeBase64url,
       options,
       deviceKeyId: authenticator.credential_id
     });

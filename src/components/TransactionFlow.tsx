@@ -19,46 +19,10 @@ interface TransactionDetails {
   network: string;
 }
 
-// Custom hook to create memoized TransactionStatus component
-function useTransactionStatus() {
-  return useMemo(() => {
-    const TransactionStatusWrapper = ({
-      walletAddress,
-      transactionDetails,
-      gasOption,
-      onFinish,
-      show
-    }: {
-      walletAddress: string;
-      transactionDetails: TransactionDetails;
-      gasOption: GasOption;
-      onFinish: () => void;
-      show: boolean;
-    }) => {
-      // Only render if show is true
-      if (!show) return null;
-
-      return (
-        <TransactionStatus
-          walletAddress={walletAddress}
-          transactionDetails={transactionDetails}
-          gasOption={gasOption}
-          onFinish={onFinish}
-        />
-      );
-    };
-
-    return React.memo(TransactionStatusWrapper);
-  }, []); // Empty deps since this should never change
-}
-
 export default function TransactionFlow({ walletAddress, onClose }: TransactionFlowProps) {
   const [currentStep, setCurrentStep] = useState<TransactionStep>('create');
   const [transactionDetails, setTransactionDetails] = useState<TransactionDetails | null>(null);
   const [gasOption, setGasOption] = useState<GasOption>('default');
-
-  // Get memoized TransactionStatus component
-  const MemoizedTransactionStatus = useTransactionStatus();
 
   // Memoize transaction details to prevent unnecessary re-renders
   const stableTransactionDetails = useMemo(() => ({
@@ -137,14 +101,14 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
       <div className="relative bg-zinc-900 rounded-lg p-12 w-full max-w-xl max-h-[90vh] overflow-y-auto">
         {renderStepIndicator()}
         
-        {/* Memoized TransactionStatus that won't unmount */}
+        {/* Memoized TransactionStatus */}
         {transactionDetails && (
-          <MemoizedTransactionStatus
+          <TransactionStatus
             walletAddress={walletAddress}
             transactionDetails={stableTransactionDetails}
             gasOption={gasOption}
             onFinish={handleFinishTransaction}
-            show={currentStep === 'complete'}
+            visible={currentStep === 'complete'}
           />
         )}
         

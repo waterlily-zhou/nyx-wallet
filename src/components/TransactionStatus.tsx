@@ -16,6 +16,7 @@ interface TransactionStatusProps {
   transactionDetails: TransactionDetails;
   gasOption: 'default' | 'sponsored' | 'usdc' | 'bundler';
   onFinish: () => void;
+  visible: boolean;
 }
 
 interface TransactionResult {
@@ -29,120 +30,56 @@ export default function TransactionStatus({
   walletAddress, 
   transactionDetails, 
   gasOption,
-  onFinish 
+  onFinish,
+  visible
 }: TransactionStatusProps) {
   const [status, setStatus] = useState<'submitting' | 'authenticating' | 'success' | 'error'>('submitting');
   const [result, setResult] = useState<TransactionResult | null>(null);
   
   // Create refs outside useEffect to persist across re-renders
-  const transactionInProgress = useRef<string | null>(null);
-  const isTransactionActive = useRef(false);
-  const isMounted = useRef(true);
+  const isMountedRef = useRef(true);
+  const hasStartedRef = useRef(false);
   
-  // Generate transaction ID once on mount
-  const transactionId = useRef(`${walletAddress}-${Date.now()}`);
-  
-  // Handle component mount/unmount
+
   useEffect(() => {
-    console.log('🔄 Component mounted');
-    isMounted.current = true;
+    console.log('Component mounted');
     return () => {
       console.log('🔄 Component unmounting');
-      isMounted.current = false;
-      // Clean up any ongoing transaction
-      if (transactionInProgress.current) {
-        console.log('🧹 Cleaning up transaction on unmount:', transactionInProgress.current);
-        transactionInProgress.current = null;
-        isTransactionActive.current = false;
-      }
+      isMountedRef.current = false;
     };
-  }, []); // Empty dependency array since this only handles mount/unmount
+  }, []);
 
-  // Safe state setter that only updates if component is mounted
-  const safeSetState = (setter: Function, value: any) => {
-    if (isMounted.current) {
-      setter(value);
-    }
-  };
-  
   // Separate useEffect for transaction logic
   useEffect(() => {
-    // Don't start a new transaction if one is already in progress
-    if (transactionInProgress.current || isTransactionActive.current) {
-      console.log('🔄 Transaction already in progress, skipping:', transactionInProgress.current);
-      return;
-    }
-
-    const currentTransactionId = transactionId.current;
+    if (!visible || hasStartedRef.current) return;
+    hasStartedRef.current = true;
     
     const sendTransaction = async () => {
-      // Set transaction as active immediately
-      isTransactionActive.current = true;
-      transactionInProgress.current = currentTransactionId;
-
-      console.log('🚀 Starting transaction flow:', {
-        transactionId: currentTransactionId,
-        walletAddress,
-        recipient: transactionDetails.recipient,
-        amount: transactionDetails.amount,
-        gasOption
-      });
-
       try {
-        // 1. Get WebAuthn challenge and device key in a single request
-        console.log('📤 Requesting transaction challenge...');
-        const challengeResponse = await fetch('/api/auth/transaction-challenge', {
+        setStatus('authenticating');
+
+        const challengeRes = await fetch('/api/auth/transaction-challenge', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             to: transactionDetails.recipient,
             value: transactionDetails.amount,
-            data: '0x', // Simple ETH transfer
+            data: '0x',
             includeDeviceKey: true
           })
         });
 
-        if (!isMounted.current) {
-          console.log('⚠️ Component unmounted during challenge request');
-          return;
-        }
+        if (!challengeRes.ok) throw new Error('Challenge failed');
+        const { challenge, options } = await challengeRes.json();
 
-        if (!challengeResponse.ok) {
-          throw new Error('Failed to get transaction challenge');
-        }
+        const webAuthnResponse = await startAuthentication({ optionsJSON: options });
 
-        const { challenge, options, deviceKeyId } = await challengeResponse.json();
-        
-        // Set status before starting WebAuthn
-        safeSetState(setStatus, 'authenticating');
+        setStatus('submitting');
 
-        // 2. Get WebAuthn signature
-        let webAuthnResponse;
-        try {
-          webAuthnResponse = await startAuthentication({ optionsJSON: options });
-          
-          if (!isMounted.current) {
-            console.log('⚠️ Component unmounted during WebAuthn');
-            return;
-          }
-        } catch (webAuthnError) {
-          if (isMounted.current) {
-            console.error('❌ WebAuthn authentication failed:', webAuthnError);
-          }
-          throw webAuthnError;
-        }
-
-        // Set status back to submitting for transaction
-        safeSetState(setStatus, 'submitting');
-
-        // 3. Send the transaction
         const response = await fetch('/api/transaction/send', {
           method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
+          headers: { 'Content-Type': 'application/json' },
+          credentials: 'include',
           body: JSON.stringify({
             to: transactionDetails.recipient,
             value: transactionDetails.amount,
@@ -153,56 +90,30 @@ export default function TransactionStatus({
           })
         });
 
-        if (!isMounted.current) {
-          console.log('⚠️ Component unmounted during transaction send');
-          return;
-        }
-
         const data = await response.json();
-        
-        if (!response.ok) {
-          throw new Error(data.error || 'Transaction failed to send');
-        }
 
-        safeSetState(setStatus, 'success');
-        safeSetState(setResult, {
-          success: true,
-          userOpHash: data.data?.userOpHash,
-          explorerUrl: data.data?.explorerUrl
-        });
+        if (!response.ok) throw new Error(data.error || 'Transaction failed');
 
-      } catch (error) {
-        if (isMounted.current) {
-          console.error('❌ Transaction error:', error);
-          safeSetState(setStatus, 'error');
-          safeSetState(setResult, {
-            success: false,
-            error: error instanceof Error ? error.message : 'Failed to send transaction'
+        if (isMountedRef.current) {
+          setStatus('success');
+          setResult({
+            success: true,
+            userOpHash: data.data?.userOpHash,
+            explorerUrl: data.data?.explorerUrl
           });
         }
-      } finally {
-        if (isMounted.current) {
-          console.log('🧹 Cleaning up transaction state:', currentTransactionId);
-          transactionInProgress.current = null;
-          isTransactionActive.current = false;
+      } catch (err: any) {
+        if (isMountedRef.current) {
+          setStatus('error');
+          setResult({ success: false, error: err.message || 'Error sending transaction' });
         }
       }
     };
 
-    // Start transaction if mounted
-    if (isMounted.current) {
-      sendTransaction();
-    }
+    sendTransaction();
+  }, [visible]);
 
-    // Cleanup function
-    return () => {
-      if (transactionInProgress.current === currentTransactionId) {
-        console.log('🔄 Cleaning up specific transaction:', currentTransactionId);
-        transactionInProgress.current = null;
-        isTransactionActive.current = false;
-      }
-    };
-  }, [walletAddress, transactionDetails.recipient, transactionDetails.amount, gasOption]); // Include all dependencies
+  if (!visible) return null;
 
   // Update the render logic to use the new status state
   return (
