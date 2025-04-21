@@ -148,8 +148,33 @@ export async function POST(request: NextRequest) {
           clientExtensionResults: {}
         });
         
+        console.log('/send/route.ts typeof credential_public_key:', typeof authenticator.credential_public_key);
+        console.log('/send/route.ts is Buffer:', Buffer.isBuffer(authenticator.credential_public_key));
+        
+
+        function decodeBase64String(b64: string): Buffer {
+          return Buffer.from(b64, 'base64');
+        }
+        
+
         // Ensure credential publicKey is in the correct format
-        const publicKeyBuffer = Buffer.from(authenticator.credential_public_key, 'base64');
+        let publicKeyBuffer: Buffer;
+        try {
+          // Check if the key is stored in hex format (common in Supabase bytea columns)
+          const isHexFormat = /^[0-9a-fA-F]+$/.test(authenticator.credential_public_key);
+          
+          publicKeyBuffer = isHexFormat
+            ? Buffer.from(authenticator.credential_public_key, 'hex')
+            : Buffer.from(authenticator.credential_public_key, 'base64');
+          
+          console.log('✅ Credential_public_key decoded using:', isHexFormat ? 'hex' : 'base64');
+          console.log('✅ Credential_public_key length:', publicKeyBuffer.length);
+        } catch (e) {
+          console.error('❌ Invalid credential_public_key format:', e);
+          throw new Error('Invalid credential_public_key format');
+        }
+        
+
         
         // Use the verification function with the proper parameters
         const verification = await verifyAuthenticationResponse({
