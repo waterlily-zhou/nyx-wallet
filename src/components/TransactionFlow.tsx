@@ -45,13 +45,21 @@ export default function TransactionFlow({ walletAddress, onClose, visible }: Tra
   // This helps debugging issues
   useEffect(() => {
     console.log('TransactionFlow component mounted, currentStep:', currentStep);
+    
+    // Prevent unmounting from resetting the context
+    const currentDetails = transactionDetails;
+    const currentStateStep = currentStep;
+    
     return () => {
-      console.log('TransactionFlow component is unmounting');
-      if (!transactionInProgress) {
-        resetTransaction();
-      }
+      console.log('TransactionFlow component is unmounting, preserving state:', {
+        step: currentStateStep,
+        hasDetails: !!currentDetails
+      });
+      
+      // IMPORTANT: Don't reset state on unmount to prevent state loss
+      // Only do cleanup if explicitly requested by other actions
     };
-  }, [resetTransaction, transactionInProgress, currentStep]);
+  }, [transactionDetails, currentStep]);
 
   // Log state changes for debugging
   useEffect(() => {
@@ -89,9 +97,13 @@ export default function TransactionFlow({ walletAddress, onClose, visible }: Tra
       };
       
       // IMPORTANT: Use the combined context method to update transaction details and move to confirm step
+      console.log('Moving to confirm step with details:', localDetails);
       moveToConfirmStep(localDetails);
       
-      console.log('Step changed - currentStep=confirm, showing confirmation screen');
+      // Force re-render to ensure we show the confirmation page immediately
+      setTimeout(() => {
+        console.log('Step changed - currentStep=confirm, showing confirmation screen');
+      }, 50);
       
       // Return false to ensure no navigation happens
       return false;

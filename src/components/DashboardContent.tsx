@@ -150,7 +150,10 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const handleSendClick = () => {
     try {
       console.log('Opening transaction flow...');
-      setShowTransactionFlow(true);
+      // Force a state update in the parent component to prevent unmounting issues
+      setTimeout(() => {
+        setShowTransactionFlow(true);
+      }, 0);
     } catch (error) {
       console.error('Error opening transaction flow:', error);
     }
@@ -159,9 +162,12 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const handleCloseTransactionFlow = () => {
     try {
       console.log('Closing transaction flow...');
-      setShowTransactionFlow(false);
-      // Refresh balance after transaction flow is closed
-      refreshBalance();
+      // Schedule the state update after current render cycle
+      setTimeout(() => {
+        setShowTransactionFlow(false);
+        // Refresh balance after transaction flow is closed
+        refreshBalance();
+      }, 0);
     } catch (error) {
       console.error('Error closing transaction flow:', error);
     }
