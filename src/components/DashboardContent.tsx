@@ -148,13 +148,23 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   };
   
   const handleSendClick = () => {
-    setShowTransactionFlow(true);
+    try {
+      console.log('Opening transaction flow...');
+      setShowTransactionFlow(true);
+    } catch (error) {
+      console.error('Error opening transaction flow:', error);
+    }
   };
 
   const handleCloseTransactionFlow = () => {
-    setShowTransactionFlow(false);
-    // Refresh balance after transaction flow is closed
-    refreshBalance();
+    try {
+      console.log('Closing transaction flow...');
+      setShowTransactionFlow(false);
+      // Refresh balance after transaction flow is closed
+      refreshBalance();
+    } catch (error) {
+      console.error('Error closing transaction flow:', error);
+    }
   };
   
   const fetchNetworkInfo = async () => {
@@ -317,13 +327,12 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
         </div>
       </div>
       
-      {/* Transaction Flow Modal */}
-      {showTransactionFlow && (
-        <TransactionFlow 
-          walletAddress={walletAddress}
-          onClose={handleCloseTransactionFlow}
-        />
-      )}
+      {/* Transaction Flow Modal - Always mounted but conditionally visible */}
+      <TransactionFlow 
+        walletAddress={walletAddress}
+        onClose={handleCloseTransactionFlow}
+        visible={showTransactionFlow}
+      />
     </div>
   );
 } 

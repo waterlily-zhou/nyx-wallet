@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useState, useContext, useMemo, useRef, ReactNode } from 'react';
+import React, { createContext, useState, useContext, useMemo, useRef, ReactNode, useEffect } from 'react';
 
 type TransactionStep = 'create' | 'confirm' | 'complete';
 type GasOption = 'default' | 'sponsored' | 'usdc' | 'bundler';
@@ -55,13 +55,61 @@ const TransactionContext = createContext<TransactionContextType>({
 
 // Provider component
 export function TransactionProvider({ children }: { children: ReactNode }) {
-  const [currentStep, setCurrentStep] = useState<TransactionStep>('create');
-  const [transactionDetails, setTransactionDetails] = useState<TransactionDetails | null>(null);
-  const [gasOption, setGasOption] = useState<GasOption>('default');
-  const [transactionInProgress, setTransactionInProgress] = useState<boolean>(false);
+  // Initialize state from localStorage if available
+  const initializeStateFromStorage = () => {
+    if (typeof window === 'undefined') {
+      console.log('Running on server, skipping localStorage initialization');
+      return null;
+    }
+    
+    try {
+      console.log('Attempting to load transaction state from localStorage');
+      const savedState = localStorage.getItem('transactionState');
+      if (savedState) {
+        const parsed = JSON.parse(savedState);
+        console.log('Successfully loaded transaction state:', parsed);
+        return parsed;
+      }
+      console.log('No saved transaction state found in localStorage');
+    } catch (error) {
+      console.error('Error reading transaction state from localStorage:', error);
+    }
+    return null;
+  };
+
+  const savedState = initializeStateFromStorage();
+  
+  const [currentStep, setCurrentStep] = useState<TransactionStep>(savedState?.currentStep || 'create');
+  const [transactionDetails, setTransactionDetails] = useState<TransactionDetails | null>(
+    savedState?.transactionDetails || null
+  );
+  const [gasOption, setGasOption] = useState<GasOption>(savedState?.gasOption || 'default');
+  const [transactionInProgress, setTransactionInProgress] = useState<boolean>(
+    savedState?.transactionInProgress || false
+  );
   
   // Use a ref to store the current transaction ID to ensure it persists across renders
-  const currentTransactionIdRef = useRef<string | null>(null);
+  const currentTransactionIdRef = useRef<string | null>(savedState?.transactionId || null);
+
+  // Save state to localStorage whenever it changes
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    
+    try {
+      const stateToSave = {
+        currentStep,
+        transactionDetails,
+        gasOption,
+        transactionInProgress,
+        transactionId: currentTransactionIdRef.current
+      };
+      
+      console.log('Saving transaction state to localStorage:', stateToSave);
+      localStorage.setItem('transactionState', JSON.stringify(stateToSave));
+    } catch (error) {
+      console.error('Error saving transaction state to localStorage:', error);
+    }
+  }, [currentStep, transactionDetails, gasOption, transactionInProgress]);
 
   // Generate a unique transaction ID
   const generateTransactionId = () => {
@@ -77,12 +125,13 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
 
   // Helper function for going to a specific step
   const goToStep = (step: TransactionStep) => {
-    console.log(`TransactionContext: going to step ${step}`);
+    console.log(`TransactionContext: going to step ${step} from current step ${currentStep}`);
     setCurrentStep(step);
   };
 
   // Helper functions
   const moveToConfirmStep = (details: TransactionDetails) => {
+    console.log(`TransactionContext: moving to confirm step with details:`, details);
     setTransactionDetails(details);
     goToStep('confirm');
   };

@@ -8,6 +8,7 @@ import DashboardContent from './DashboardContent';
 import AddressBookContent from './AddressBookContent';
 import TransactionsContent from './TransactionsContent';
 import SettingsContent from './SettingsContent';
+import { TransactionProvider } from '@/contexts/TransactionContext';
 
 interface WalletInfo {
   address: string;
@@ -89,56 +90,60 @@ export default function WalletDashboard() {
 
   if (!walletInfo) {
     return (
-      <div className="flex h-screen bg-black text-white">
-        {/* Sidebar skeleton */}
-        <div className="w-64 border-r border-gray-800 p-4">
-          <div className="animate-pulse">
-            <div className="h-6 bg-gray-700 rounded w-3/4 mb-4"></div>
-            <div className="h-12 bg-gray-700 rounded-full w-12 mb-4"></div>
-            <div className="h-4 bg-gray-700 rounded w-full mb-2"></div>
-            <div className="h-4 bg-gray-700 rounded w-5/6 mb-8"></div>
-            <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
-            <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
-            <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
+      <TransactionProvider>
+        <div className="flex h-screen bg-black text-white">
+          {/* Sidebar skeleton */}
+          <div className="w-64 border-r border-gray-800 p-4">
+            <div className="animate-pulse">
+              <div className="h-6 bg-gray-700 rounded w-3/4 mb-4"></div>
+              <div className="h-12 bg-gray-700 rounded-full w-12 mb-4"></div>
+              <div className="h-4 bg-gray-700 rounded w-full mb-2"></div>
+              <div className="h-4 bg-gray-700 rounded w-5/6 mb-8"></div>
+              <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
+              <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
+              <div className="h-4 bg-gray-700 rounded w-1/2 mb-4"></div>
+            </div>
+          </div>
+          
+          {/* Main content skeleton */}
+          <div className="flex-1 p-8">
+            <div className="animate-pulse">
+              <div className="h-8 bg-gray-700 rounded w-1/4 mb-6"></div>
+              <div className="h-12 bg-gray-700 rounded w-1/3 mb-8"></div>
+            </div>
           </div>
         </div>
-        
-        {/* Main content skeleton */}
-        <div className="flex-1 p-8">
-          <div className="animate-pulse">
-            <div className="h-8 bg-gray-700 rounded w-1/4 mb-6"></div>
-            <div className="h-12 bg-gray-700 rounded w-1/3 mb-8"></div>
-          </div>
-        </div>
-      </div>
+      </TransactionProvider>
     );
   }
 
   return (
-    <div className="flex h-screen bg-black text-white">
-      {/* Sidebar */}
-      <DashboardSidebar 
-        walletAddress={walletInfo.address} 
-        activeTab={activeTab}
-        onTabChange={handleTabChange}
-      />
-      
-      {/* Main content area */}
-      {activeTab === 'dashboard' && (
-        <DashboardContent walletAddress={walletInfo.address} />
-      )}
-      
-      {activeTab === 'address-book' && (
-        <AddressBookContent walletAddress={walletInfo.address} />
-      )}
-      
-      {activeTab === 'transactions' && (
-        <TransactionsContent walletAddress={walletInfo.address} />
-      )}
-      
-      {activeTab === 'settings' && (
-        <SettingsContent walletAddress={walletInfo.address} />
-      )}
-    </div>
+    <TransactionProvider>
+      <div className="flex h-screen bg-black text-white">
+        {/* Sidebar */}
+        <DashboardSidebar 
+          walletAddress={walletInfo.address} 
+          activeTab={activeTab}
+          onTabChange={handleTabChange}
+        />
+        
+        {/* Main content area */}
+        {activeTab === 'dashboard' && (
+          <DashboardContent walletAddress={walletInfo.address} />
+        )}
+        
+        {activeTab === 'address-book' && (
+          <AddressBookContent walletAddress={walletInfo.address} />
+        )}
+        
+        {activeTab === 'transactions' && (
+          <TransactionsContent walletAddress={walletInfo.address} />
+        )}
+        
+        {activeTab === 'settings' && (
+          <SettingsContent walletAddress={walletInfo.address} />
+        )}
+      </div>
+    </TransactionProvider>
   );
 } 

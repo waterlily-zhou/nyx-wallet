@@ -63,87 +63,107 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     
-    // Check if a transaction is already in progress
-    if (transactionInProgress) {
-      setError('A transaction is already in progress. Please wait.');
-      return;
-    }
-    
-    setError(null);
-
-    if (!recipient.trim()) {
-      setError('Recipient address is required');
-      return;
-    }
-    
-    if (!recipient.startsWith('0x') || recipient.length !== 42) {
-      setError('Invalid recipient address format');
-      return;
-    }
-    
-    if (!amount || parseFloat(amount) <= 0) {
-      setError('Amount must be greater than 0');
-      return;
-    }
-
-    // Add validation for maximum amount
-    const MAX_AMOUNT = 1000000; // 1 million ETH as a reasonable upper limit
-    if (parseFloat(amount) > MAX_AMOUNT) {
-      setError(`Amount cannot exceed ${MAX_AMOUNT.toLocaleString()} ETH`);
-      return;
-    }
-    
-    // Ensure the amount is a valid number with at most 18 decimal places
-    const cleanAmount = amount.replace(/[^\d.]/g, '');
-    const parts = cleanAmount.split('.');
-    const wholeNumber = parts[0];
-    const decimals = parts[1]?.slice(0, 18) || '';
-    const formattedAmount = `${wholeNumber}${decimals ? '.' + decimals : ''}`;
-    
-    // Log the comparison values
-    console.log('Form: Amount validation', {
-      originalAmount: amount,
-      cleanAmount,
-      formattedAmount,
-      maxAmount,
-      maxAmountFloat: parseFloat(maxAmount),
-      amountInWei: parseEther(formattedAmount).toString(),
-      maxAmountInWei: parseEther(maxAmount).toString(),
-      comparison: {
-        usingFloat: parseFloat(formattedAmount) > parseFloat(maxAmount),
-        usingWei: parseEther(formattedAmount) > parseEther(maxAmount)
+    try {
+      // Check if a transaction is already in progress
+      if (transactionInProgress) {
+        setError('A transaction is already in progress. Please wait.');
+        return;
       }
-    });
-    
-    if (parseFloat(formattedAmount) > parseFloat(maxAmount)) {
-      setError('Amount exceeds your balance');
-      return;
+      
+      setError(null);
+
+      if (!recipient.trim()) {
+        setError('Recipient address is required');
+        return;
+      }
+      
+      if (!recipient.startsWith('0x') || recipient.length !== 42) {
+        setError('Invalid recipient address format');
+        return;
+      }
+      
+      if (!amount || parseFloat(amount) <= 0) {
+        setError('Amount must be greater than 0');
+        return;
+      }
+
+      // Add validation for maximum amount
+      const MAX_AMOUNT = 1000000; // 1 million ETH as a reasonable upper limit
+      if (parseFloat(amount) > MAX_AMOUNT) {
+        setError(`Amount cannot exceed ${MAX_AMOUNT.toLocaleString()} ETH`);
+        return;
+      }
+      
+      // Ensure the amount is a valid number with at most 18 decimal places
+      const cleanAmount = amount.replace(/[^\d.]/g, '');
+      const parts = cleanAmount.split('.');
+      const wholeNumber = parts[0];
+      const decimals = parts[1]?.slice(0, 18) || '';
+      const formattedAmount = `${wholeNumber}${decimals ? '.' + decimals : ''}`;
+      
+      // Log the comparison values
+      console.log('Form: Amount validation', {
+        originalAmount: amount,
+        cleanAmount,
+        formattedAmount,
+        maxAmount,
+        maxAmountFloat: parseFloat(maxAmount),
+        amountInWei: parseEther(formattedAmount).toString(),
+        maxAmountInWei: parseEther(maxAmount).toString(),
+        comparison: {
+          usingFloat: parseFloat(formattedAmount) > parseFloat(maxAmount),
+          usingWei: parseEther(formattedAmount) > parseEther(maxAmount)
+        }
+      });
+      
+      if (parseFloat(formattedAmount) > parseFloat(maxAmount)) {
+        setError('Amount exceeds your balance');
+        return;
+      }
+
+      // After validations, but before creating the formData object
+      console.log('Form validation passed, proceeding to create transaction');
+
+      // Create form data object
+      const formData = {
+        recipient,
+        amount: formattedAmount,
+        network
+      };
+      
+      // Update transaction details in context
+      setTransactionDetails(formData);
+      console.log('Transaction details updated in context', formData);
+
+      // Call the callback from parent
+      console.log('Calling onNext callback with data:', JSON.stringify(formData));
+      try {
+        // Wrap in a try-catch and return false to prevent navigation
+        onNext(formData);
+        return false; // Prevent any potential navigation
+      } catch (err) {
+        console.error('Error in onNext callback:', err);
+      }
+
+      console.log('onNext callback completed');
+    } catch (err) {
+      console.error('Error in form submission:', err);
+      setError('An unexpected error occurred. Please try again.');
     }
-
-    // After validations, but before creating the formData object
-    console.log('Form validation passed, proceeding to create transaction');
-
-    // Create form data object
-    const formData = {
-      recipient,
-      amount: formattedAmount,
-      network
-    };
-    
-    // Update transaction details in context
-    setTransactionDetails(formData);
-    console.log('Transaction details updated in context', formData);
-
-    // Call the callback from parent
-    console.log('Calling onNext callback');
-    onNext(formData);
   };
 
   return (
     <div className="w-full max-w-lg mx-auto">
       <h2 className="text-xl mb-8">Create a transaction</h2>
       
-      <form onSubmit={handleSubmit} className="space-y-6">
+      <form 
+        onSubmit={(e) => {
+          e.preventDefault(); // Ensure we prevent default
+          handleSubmit(e);
+        }} 
+        className="space-y-6"
+        noValidate // Add noValidate to disable browser validation that might trigger navigation
+      >
         {/* Network Selection */}
         <div>
           <div className="relative border border-gray-700 rounded-lg">

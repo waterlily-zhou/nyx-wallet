@@ -44,7 +44,8 @@ export default function TransactionStatus({
   const { 
     setTransactionInProgress, 
     getCurrentTransactionId,
-    generateTransactionId
+    generateTransactionId,
+    currentStep
   } = useTransaction();
   
   // Create refs outside useEffect to persist across re-renders
@@ -336,6 +337,21 @@ export default function TransactionStatus({
     console.log(`[WebAuthn] Starting WebAuthn flow for stable txId: ${transactionIdRef.current}`);
     doWebAuthn();
   }, [status, transactionDetails, walletAddress, visible, gasOption, setTransactionInProgress]);
+
+  // Add an effect to synchronize with context state on mount or visibility change
+  useEffect(() => {
+    console.log(`[TransactionStatus] Component ${visible ? 'visible' : 'hidden'}, currentStep=${currentStep}, status=${status}`);
+    
+    // If we're becoming visible and the context already indicates we're in a specific step,
+    // ensure our internal status matches the external state
+    if (visible) {
+      if (currentStep === 'complete' && status !== 'authenticating' && status !== 'success') {
+        // If context says we're in complete step, we should be in authenticating
+        // unless we've already succeeded
+        setStatus('authenticating');
+      }
+    }
+  }, [visible, currentStep, status]);
 
   // Don't render anything when not visible
   if (!visible) return null;

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo, useEffect } from 'react';
+import React, { useMemo, useEffect } from 'react';
 import TransactionForm from './TransactionForm';
 import TransactionConfirmation from './TransactionConfirmation';
 import TransactionStatus from './TransactionStatus';
@@ -9,24 +9,22 @@ import { useTransaction } from '../contexts/TransactionContext';
 interface TransactionFlowProps {
   walletAddress: string;
   onClose: () => void;
+  visible: boolean;
 }
 
-export default function TransactionFlow({ walletAddress, onClose }: TransactionFlowProps) {
-  // Local state for UI only
-  const [viewState, setViewState] = useState<'create' | 'confirm' | 'complete'>('create');
-  
+export default function TransactionFlow({ walletAddress, onClose, visible }: TransactionFlowProps) {
   const { 
     currentStep, 
     transactionDetails, 
     gasOption, 
     transactionInProgress,
     goToStep,
-    setTransactionDetails: updateTransactionDetails,
-    setGasOption: updateGasOption,
+    moveToConfirmStep,
+    moveToCompleteStep,
     resetTransaction
   } = useTransaction();
   
-  console.log(`TransactionFlow: viewState=${viewState}, contextStep=${currentStep}, inProgress=${transactionInProgress}`);
+  console.log(`TransactionFlow: contextStep=${currentStep}, inProgress=${transactionInProgress}, visible=${visible}`);
 
   // Memoize transaction details to prevent unnecessary re-renders
   const stableTransactionDetails = useMemo(() => ({
@@ -35,97 +33,85 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
     network: transactionDetails?.network || ''
   }), [transactionDetails?.recipient, transactionDetails?.amount, transactionDetails?.network]);
 
-  // Sync context step with local view state when component mounts
+  // Ensure transaction details are available for components
+  const hasValidTransactionDetails = useMemo(() => {
+    return !!(
+      transactionDetails?.recipient && 
+      transactionDetails?.amount && 
+      transactionDetails?.network
+    );
+  }, [transactionDetails]);
+
+  // This helps debugging issues
   useEffect(() => {
-    if (currentStep !== viewState) {
-      setViewState(currentStep as 'create' | 'confirm' | 'complete');
-    }
+    console.log('TransactionFlow component mounted, currentStep:', currentStep);
+    return () => {
+      console.log('TransactionFlow component is unmounting');
+      if (!transactionInProgress) {
+        resetTransaction();
+      }
+    };
+  }, [resetTransaction, transactionInProgress, currentStep]);
+
+  // Log state changes for debugging
+  useEffect(() => {
+    console.log('currentStep changed to:', currentStep);
   }, [currentStep]);
 
-  // Step indicator dots
-  const renderStepIndicator = () => (
-    <div className="flex justify-center items-center mb-8">
-      {['create', 'confirm', 'complete'].map((step, index) => (
-        <div key={step} className="flex flex-col items-center relative w-32">
-          <div className="flex items-center w-full justify-center">
-            {/* Line before dot (except for first step) */}
-            {index > 0 && (
-              <div 
-                className={`absolute w-full h-0.5 top-1.5 right-1/2 ${
-                  index <= ['create', 'confirm', 'complete'].indexOf(viewState)
-                    ? 'bg-gray-400'
-                    : 'bg-gray-700'
-                }`}
-              />
-            )}
-            {/* Dot and text as a unified component */}
-            <div className="flex flex-col items-center relative z-10">
-              <div 
-                className={`w-3 h-3 rounded-full ${
-                  step === viewState 
-                    ? 'bg-violet-500' 
-                    : index < ['create', 'confirm', 'complete'].indexOf(viewState)
-                      ? 'bg-gray-400'
-                      : 'bg-gray-600'
-                }`}
-              />
-              <span className={`text-sm mt-2 capitalize ${
-                step === viewState 
-                  ? 'text-violet-500'
-                  : index < ['create', 'confirm', 'complete'].indexOf(viewState)
-                    ? 'text-gray-400'
-                    : 'text-gray-600'
-              }`}>
-                {step}
-              </span>
-            </div>
-          </div>
-        </div>
-      ))}
-    </div>
-  );
+  // Add additional debugging for render
+  useEffect(() => {
+    console.log('RENDER DEBUG - currentStep:', currentStep, 
+                'transactionDetails:', transactionDetails ? 'exists' : 'null',
+                'confirmShouldShow:', currentStep === 'confirm' && !!transactionDetails);
+  });
+
+  // Add logging whenever transaction details change
+  useEffect(() => {
+    console.log('Transaction details updated:', JSON.stringify(transactionDetails));
+  }, [transactionDetails]);
+
+  // Don't render anything when not visible, but only after all hooks have been called
+  if (!visible) return null;
 
   // Handle form submission
   const handleFormSubmit = (formData: { recipient: string; amount: string; network: string }) => {
-    console.log('TransactionFlow: handleFormSubmit received data', formData);
-    
-    // Debug the current transaction details
-    console.log('Before update - transactionDetails:', transactionDetails);
-    
-    // Update context - IMPORTANT: set context first
-    updateTransactionDetails(formData);
-    
-    // Log after update
-    console.log('After update - formData:', formData);
-    
-    // Now that we have set transaction details, we can change step
-    setTimeout(() => {
-      // Update UI immediately
-      setViewState('confirm');
+    try {
+      console.log('TransactionFlow: handleFormSubmit received data', formData);
       
-      // Then update context step
-      goToStep('confirm');
+      // Debug the current transaction details
+      console.log('Before update - transactionDetails:', JSON.stringify(transactionDetails));
       
-      console.log('Step changed - viewState=confirm, showing confirmation screen');
-    }, 0);
+      // Create a stable local copy of the transaction details
+      const localDetails = {
+        recipient: formData.recipient,
+        amount: formData.amount,
+        network: formData.network
+      };
+      
+      // IMPORTANT: Use the combined context method to update transaction details and move to confirm step
+      moveToConfirmStep(localDetails);
+      
+      console.log('Step changed - currentStep=confirm, showing confirmation screen');
+      
+      // Return false to ensure no navigation happens
+      return false;
+    } catch (error) {
+      console.error('Error in handleFormSubmit:', error);
+      // Ensure we don't propagate errors that could cause navigation
+    }
   };
 
   // Handle confirmation
   const handleConfirmation = (selectedGasOption: 'default' | 'sponsored' | 'usdc' | 'bundler') => {
     console.log('Confirmation received with gas option:', selectedGasOption);
     
-    // Update context
-    updateGasOption(selectedGasOption);
-    goToStep('complete');
-    
-    // Update UI immediately 
-    setViewState('complete');
+    // Use the combined method to update gas option and move to complete step
+    moveToCompleteStep(selectedGasOption);
   };
 
   // Handle back button on confirmation screen
   const handleBackToForm = () => {
     goToStep('create');
-    setViewState('create');
   };
 
   // Handle finish transaction flow
@@ -139,17 +125,6 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
     }
   };
 
-  // This helps debugging issues
-  useEffect(() => {
-    console.log('TransactionFlow component mounted, viewState:', viewState);
-    return () => {
-      console.log('TransactionFlow component is unmounting');
-      if (!transactionInProgress) {
-        resetTransaction();
-      }
-    };
-  }, [resetTransaction, transactionInProgress]);
-
   // Prevent closing if a transaction is in progress
   const handleClose = () => {
     if (transactionInProgress) {
@@ -159,37 +134,65 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
     onClose();
   };
 
-  // Log state changes for debugging
-  useEffect(() => {
-    console.log('viewState changed to:', viewState);
-  }, [viewState]);
-
-  // Add additional debugging for render
-  useEffect(() => {
-    console.log('RENDER DEBUG - viewState:', viewState, 
-                'transactionDetails:', transactionDetails ? 'exists' : 'null',
-                'confirmShouldShow:', viewState === 'confirm' && !!transactionDetails);
-  });
-
   return (
     <div className="fixed inset-0 flex items-center justify-center z-50 bg-black bg-opacity-75 p-4">
       <div className="relative bg-zinc-900 rounded-lg p-12 w-full max-w-xl max-h-[90vh] overflow-y-auto">
-        {renderStepIndicator()}
-
-        {/* Debug what's being rendered */}
-        <div className="hidden">
-          Debug: viewState={viewState}, 
-          hasTransactionDetails={transactionDetails ? 'yes' : 'no'}
+        {/* Step Indicator - Directly inline the JSX */}
+        <div className="flex justify-center items-center mb-8">
+          {['create', 'confirm', 'complete'].map((step, index) => (
+            <div key={step} className="flex flex-col items-center relative w-32">
+              <div className="flex items-center w-full justify-center">
+                {/* Line before dot (except for first step) */}
+                {index > 0 && (
+                  <div 
+                    className={`absolute w-full h-0.5 top-1.5 right-1/2 ${
+                      index <= ['create', 'confirm', 'complete'].indexOf(currentStep)
+                        ? 'bg-gray-400'
+                        : 'bg-gray-700'
+                    }`}
+                  />
+                )}
+                {/* Dot and text as a unified component */}
+                <div className="flex flex-col items-center relative z-10">
+                  <div 
+                    className={`w-3 h-3 rounded-full ${
+                      step === currentStep 
+                        ? 'bg-violet-500' 
+                        : index < ['create', 'confirm', 'complete'].indexOf(currentStep)
+                          ? 'bg-gray-400'
+                          : 'bg-gray-600'
+                    }`}
+                  />
+                  <span className={`text-sm mt-2 capitalize ${
+                    step === currentStep 
+                      ? 'text-violet-500'
+                      : index < ['create', 'confirm', 'complete'].indexOf(currentStep)
+                        ? 'text-gray-400'
+                        : 'text-gray-600'
+                  }`}>
+                    {step}
+                  </span>
+                </div>
+              </div>
+            </div>
+          ))}
         </div>
 
-        {viewState === 'create' && (
+        {/* Debug what's being rendered - make visible */}
+        <div className="text-xs text-gray-500 mb-4">
+          Debug: currentStep={currentStep}, 
+          hasDetails={hasValidTransactionDetails ? 'yes' : 'no'},
+          details={JSON.stringify(stableTransactionDetails)}
+        </div>
+
+        {currentStep === 'create' && (
           <TransactionForm 
             walletAddress={walletAddress} 
             onNext={handleFormSubmit} 
           />
         )}
         
-        {viewState === 'confirm' && (
+        {currentStep === 'confirm' && (
           <TransactionConfirmation 
             walletAddress={walletAddress}
             transactionDetails={stableTransactionDetails}
@@ -198,7 +201,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
           />
         )}
         
-        {viewState === 'complete' && transactionDetails && (
+        {currentStep === 'complete' && transactionDetails && (
           <TransactionStatus
             key="transaction-status"
             walletAddress={walletAddress}
@@ -210,7 +213,7 @@ export default function TransactionFlow({ walletAddress, onClose }: TransactionF
         )}
 
         {/* Close button - only visible when no transaction is in progress */}
-        {viewState !== 'complete' && !transactionInProgress && (
+        {currentStep !== 'complete' && !transactionInProgress && (
           <button
             onClick={handleClose}
             className="absolute top-4 right-4 text-gray-400 hover:text-gray-300"
