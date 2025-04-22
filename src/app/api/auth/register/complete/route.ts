@@ -142,7 +142,7 @@ export async function POST(request: NextRequest) {
             id: crypto.randomUUID(),
             user_id: userId,
             credential_id: credentialIdStr,
-            credential_public_key: credentialPublicKey, // Store as bytea
+            credential_public_key: Buffer.from(credentialPublicKey).toString('base64'), // Store as bytea
             counter: counter,
             device_name: deviceName || 'Default Device',
             created_at: new Date().toISOString(),

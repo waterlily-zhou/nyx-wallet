@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { parseEther, formatEther } from 'viem';
+import { useTransaction } from '@/contexts/TransactionContext';
 
 interface TransactionFormProps {
   walletAddress: string;
@@ -19,6 +20,9 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
   const [network, setNetwork] = useState('Base Sepolia');
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  
+  // Add transaction context
+  const { transactionInProgress, setTransactionDetails, goToStep } = useTransaction();
 
   useEffect(() => {
     const fetchBalance = async () => {
@@ -58,6 +62,13 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
 
   const handleSubmit = (e: React.FormEvent) => {
     e.preventDefault();
+    
+    // Check if a transaction is already in progress
+    if (transactionInProgress) {
+      setError('A transaction is already in progress. Please wait.');
+      return;
+    }
+    
     setError(null);
 
     if (!recipient.trim()) {
@@ -109,11 +120,23 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
       return;
     }
 
-    onNext({
+    // After validations, but before creating the formData object
+    console.log('Form validation passed, proceeding to create transaction');
+
+    // Create form data object
+    const formData = {
       recipient,
       amount: formattedAmount,
       network
-    });
+    };
+    
+    // Update transaction details in context
+    setTransactionDetails(formData);
+    console.log('Transaction details updated in context', formData);
+
+    // Call the callback from parent
+    console.log('Calling onNext callback');
+    onNext(formData);
   };
 
   return (
@@ -221,10 +244,10 @@ export default function TransactionForm({ walletAddress, onNext }: TransactionFo
         {/* Submit button */}
         <button
           type="submit"
-          disabled={isLoading}
+          disabled={isLoading || transactionInProgress}
           className="w-full py-3 bg-violet-600 text-white font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50"
         >
-          {isLoading ? 'Processing...' : 'Next'}
+          {isLoading ? 'Processing...' : (transactionInProgress ? 'Transaction in progress...' : 'Next')}
         </button>
       </form>
     </div>

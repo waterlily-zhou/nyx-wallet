@@ -40,4 +40,6 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/scripts/node_modules
+scripts/node_modules
+scripts/package.json
+scripts/package-lock.jsonscripts/node_modules/

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect } from 'react';
+import { useTransaction } from '@/contexts/TransactionContext';
 
 interface TransactionDetails {
   recipient: string;
@@ -88,6 +89,9 @@ export default function TransactionConfirmation({
   const [isLoadingGas, setIsLoadingGas] = useState(false);
   const [gasError, setGasError] = useState<string | null>(null);
   const [aiError, setAiError] = useState<string | null>(null);
+  
+  // Add transaction context
+  const { transactionInProgress, setGasOption, goToStep } = useTransaction();
 
   useEffect(() => {
     const checkTransactionSafety = async () => {
@@ -169,7 +173,20 @@ export default function TransactionConfirmation({
   }, [selectedGasOption, transactionDetails]);
 
   const handleConfirm = () => {
+    // Check if a transaction is already in progress
+    if (transactionInProgress) {
+      console.log('Cannot confirm - transaction already in progress');
+      return;
+    }
+    
+    // Set the gas option in context
+    setGasOption(selectedGasOption);
+    
+    // Call the original onConfirm prop
     onConfirm(selectedGasOption);
+    
+    // Move to complete step (in addition to the callback)
+    goToStep('complete');
   };
 
   const formatAddress = (address: string) => {
@@ -721,14 +738,16 @@ export default function TransactionConfirmation({
             <button
               onClick={onBack}
               className="flex-1 py-3 bg-gray-800 text-white font-medium rounded-lg hover:bg-gray-700"
+              disabled={transactionInProgress}
             >
               Back
             </button>
             <button
               onClick={handleConfirm}
-              className="flex-1 py-3 bg-violet-600 text-white font-medium rounded-lg hover:bg-violet-700"
+              className="flex-1 py-3 bg-violet-600 text-white font-medium rounded-lg hover:bg-violet-700 disabled:opacity-50"
+              disabled={isLoading || isLoadingGas || transactionInProgress}
             >
-              Next
+              {transactionInProgress ? 'Processing...' : 'Next'}
             </button>
           </div>
         </div>

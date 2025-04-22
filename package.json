@@ -19,6 +19,7 @@
     "@supabase/supabase-js": "^2.49.4",
     "@types/inquirer": "^9.0.7",
     "@zerodev/sdk": "^5.4.28",
+    "cbor": "^10.0.3",
     "crypto-js": "^4.2.0",
     "dotenv": "^16.4.7",
     "ethers": "^6.8.1",
