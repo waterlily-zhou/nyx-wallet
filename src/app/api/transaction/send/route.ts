@@ -237,6 +237,44 @@ function preparePublicKeyForVerification(key: string | Buffer): Buffer {
   }
 }
 
+// Improved helper function to decode challenges
+function decodePgBytea(value: string | null | undefined): string {
+  // Handle null/undefined cases
+  if (!value) {
+    return '';
+  }
+  
+  console.log('🔍 Decoding challenge value:', {
+    type: typeof value,
+    length: value.length,
+    sample: value.substring(0, 10) + '...' + value.substring(value.length - 10),
+    isPgBytea: value.startsWith('\\x'),
+    isBase64: /^[A-Za-z0-9+/=]+$/.test(value),
+    isBase64Url: /^[A-Za-z0-9_-]+$/.test(value)
+  });
+
+  // Case 1: PostgreSQL bytea format (\x...)
+  if (value.startsWith('\\x')) {
+    console.log('✅ Detected PostgreSQL bytea format, converting from hex');
+    const hexString = value.substring(2);
+    let decodedString = '';
+    
+    // Convert each hex pair to a character
+    for (let i = 0; i < hexString.length; i += 2) {
+      decodedString += String.fromCharCode(parseInt(hexString.substring(i, i + 2), 16));
+    }
+    
+    return decodedString;
+  }
+  
+  // Case 2: Base64url format (used by WebAuthn)
+  // For base64url, we generally don't need to decode since WebAuthn handles this
+  // But we might need to convert between base64url and standard base64
+  
+  // Return as is, since WebAuthn already handles base64url format
+  return value;
+}
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = cookies();
@@ -320,85 +358,37 @@ export async function POST(request: NextRequest) {
         challenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing'
       });
       
+      // Improved challenge comparison with better logging
+      const decodedStoredChallenge = decodePgBytea(txChallenge);
+      
       console.log('🔍 Challenge Processing:', {
-        rawClientChallenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing',
-        storedChallenge: txChallenge ? `${txChallenge.substring(0, 10)}...` : 'missing',
+        rawClientChallenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...${clientData.challenge.substring(clientData.challenge.length - 10)}` : 'missing',
+        storedChallenge: txChallenge ? `${txChallenge.substring(0, 10)}...${txChallenge.substring(txChallenge.length - 10)}` : 'missing',
+        decodedStoredChallenge: decodedStoredChallenge ? `${decodedStoredChallenge.substring(0, 10)}...${decodedStoredChallenge.substring(decodedStoredChallenge.length - 10)}` : 'missing',
         clientChallengeLength: clientData.challenge?.length,
-        storedChallengeLength: txChallenge?.length
+        storedChallengeLength: txChallenge?.length,
+        decodedChallengeLength: decodedStoredChallenge?.length,
+        challengesMatch: clientData.challenge === decodedStoredChallenge,
+        firstDifference: clientData.challenge && decodedStoredChallenge ? 
+          findFirstDifferenceIndex(clientData.challenge, decodedStoredChallenge) : 'N/A'
       });
 
-      // IMPORTANT: Use a more lenient comparison for challenges
-      // WebAuthn challenges can sometimes have small encoding differences
-      function normalizeChallenge(challenge: string) {
-        // Remove potential padding characters and normalize case
-        return challenge.replace(/=+$/, '').toLowerCase();
-      }
-
-      // Try to decode base64url to raw bytes for comparison
-      function tryDecodeBase64Challenge(challenge: string): Buffer {
-        try {
-          // Convert base64url to base64
-          const base64 = challenge
-            .replace(/-/g, '+')
-            .replace(/_/g, '/');
-          
-          // Add padding if needed
-          const paddedBase64 = base64.padEnd(
-            base64.length + (4 - (base64.length % 4 || 4)) % 4,
-            '='
-          );
-          
-          return Buffer.from(paddedBase64, 'base64');
-        } catch (e) {
-          console.error('Failed to decode challenge:', e);
-          return Buffer.from([]);
-        }
-      }
-      
-      const normalizedStoredChallenge = normalizeChallenge(txChallenge);
-      const normalizedReceivedChallenge = normalizeChallenge(clientData.challenge);
-      
-      // Try byte-level comparison as well
-      const storedChallengeBytes = tryDecodeBase64Challenge(txChallenge);
-      const receivedChallengeBytes = tryDecodeBase64Challenge(clientData.challenge);
-      const byteComparisonMatch = storedChallengeBytes.length > 0 && 
-                                  receivedChallengeBytes.length > 0 &&
-                                  Buffer.compare(storedChallengeBytes, receivedChallengeBytes) === 0;
-      
-      console.log('🔍 Challenge comparison:', {
-        stringMatch: normalizedReceivedChallenge === normalizedStoredChallenge,
-        byteMatch: byteComparisonMatch,
-        storedByteLength: storedChallengeBytes.length,
-        receivedByteLength: receivedChallengeBytes.length
-      });
-      
-      // Log the challenges in a more inspectable format
-      console.log('🔍 Challenge details:', {
-        storedChallenge: txChallenge,
-        receivedChallenge: clientData.challenge
-      });
-      
-      // Check if either string comparison or byte comparison matches
-      const challengeMatches = normalizedReceivedChallenge === normalizedStoredChallenge || byteComparisonMatch;
-      
-      if (!challengeMatches) {
+      // Compare the client challenge with the decoded stored challenge
+      if (clientData.challenge !== decodedStoredChallenge) {
         console.log('❌ Challenge mismatch:', {
-          stored: txChallenge,
-          received: clientData.challenge,
+          stored: txChallenge?.substring(0, 20) + '...',
+          decoded: decodedStoredChallenge?.substring(0, 20) + '...',
+          received: clientData.challenge?.substring(0, 20) + '...',
           storedLength: txChallenge?.length,
+          decodedLength: decodedStoredChallenge?.length,
           receivedLength: clientData.challenge?.length,
-          normalizedStored: normalizedStoredChallenge,
-          normalizedReceived: normalizedReceivedChallenge,
-          byteComparisonMatch
+          // Try to identify where they differ
+          diffPosition: findFirstDifferenceIndex(clientData.challenge, decodedStoredChallenge)
         });
-        
-        // We'll continue with verification despite the string mismatch
-        // The simplewebauthn library can handle some encoding variations
-        console.log('🔄 Continuing with verification despite challenge mismatch');
-      } else {
-        console.log('✅ Challenge verified successfully', normalizedReceivedChallenge === normalizedStoredChallenge ? 
-          'with string comparison' : 'with byte-level comparison');
+        throw new Error('Challenge mismatch');
       }
+
+      console.log('✅ Challenge verified successfully');
 
       try {
         // Convert Maps to plain objects in the response
@@ -424,67 +414,48 @@ export async function POST(request: NextRequest) {
         }
 
         // Use the specialized function to prepare the public key
-        const publicKeyBuffer = preparePublicKeyForVerification(authenticator.credential_public_key);
+        // First decode from PostgreSQL bytea format if necessary
+        const credentialKey = authenticator.credential_public_key;
+        console.log('🔍 Credential key format:', {
+          original: credentialKey ? `${typeof credentialKey === 'string' ? credentialKey.substring(0, 30) : 'Buffer'}...` : 'missing',
+          isBytea: typeof credentialKey === 'string' && credentialKey.startsWith('\\x')
+        });
         
-        // Try both the stored challenge and the client's challenge
-        // The library might handle one format better than the other
-        try {
-          console.log('🔒 Attempting verification with client-provided challenge');
+        // Decode the public key from PostgreSQL bytea format if needed
+        const decodedKey = typeof credentialKey === 'string' 
+          ? decodePgBytea(credentialKey) 
+          : credentialKey;
           
-          // Use the verification function with the prepared key
-          const verification = await verifyAuthenticationResponse({
-            response: safeResponse,
-            expectedChallenge: clientData.challenge, // Use client challenge
-            expectedOrigin: origin,
-            expectedRPID: rpID,
-            requireUserVerification: true,
-            credential: {
-              publicKey: publicKeyBuffer,
-              id: authenticator.credential_id,
-              counter: authenticator.counter || 0
-            }
-          });
-          
-          console.log('✅ WebAuthn verification successful with client challenge!');
-          
-          // Update authenticator counter
-          await supabase
-            .from('authenticators')
-            .update({ 
-              counter: verification.authenticationInfo.newCounter,
-              last_used: new Date().toISOString()
-            })
-            .eq('id', authenticator.id);
-            
-        } catch (clientChallengeError) {
-          console.log('⚠️ Verification with client challenge failed, trying stored challenge');
-          console.error('Client challenge verification error:', clientChallengeError);
-          
-          // Fall back to stored challenge
-          const verification = await verifyAuthenticationResponse({
-            response: safeResponse,
-            expectedChallenge: txChallenge, // Use stored challenge as fallback
-            expectedOrigin: origin,
-            expectedRPID: rpID,
-            requireUserVerification: true,
-            credential: {
-              publicKey: publicKeyBuffer,
-              id: authenticator.credential_id,
-              counter: authenticator.counter || 0
-            }
-          });
-          
-          console.log('✅ WebAuthn verification successful with stored challenge!');
-          
-          // Update authenticator counter
-          await supabase
-            .from('authenticators')
-            .update({ 
-              counter: verification.authenticationInfo.newCounter,
-              last_used: new Date().toISOString()
-            })
-            .eq('id', authenticator.id);
-        }
+        console.log('🔍 Decoded credential key:', {
+          decoded: decodedKey ? (typeof decodedKey === 'string' ? decodedKey.substring(0, 30) : 'Buffer') + '...' : 'missing'
+        });
+        
+        const publicKeyBuffer = preparePublicKeyForVerification(decodedKey);
+        
+        // Use the verification function with the prepared key
+        const verification = await verifyAuthenticationResponse({
+          response: safeResponse,
+          expectedChallenge: clientData.challenge,
+          expectedOrigin: origin,
+          expectedRPID: rpID,
+          requireUserVerification: true,
+          credential: {
+            publicKey: publicKeyBuffer,
+            id: authenticator.credential_id,
+            counter: authenticator.counter || 0
+          }
+        });
+
+        console.log('✅ WebAuthn verification successful!');
+        
+        // Update authenticator counter
+        await supabase
+          .from('authenticators')
+          .update({ 
+            counter: verification.authenticationInfo.newCounter,
+            last_used: new Date().toISOString()
+          })
+          .eq('id', authenticator.id);
       
       } catch (error) {
         console.error('WebAuthn verification error:', error);
@@ -545,19 +516,19 @@ export async function POST(request: NextRequest) {
       // Now proceed with the transaction
       console.log('Sending transaction...');
       const result = await sendTransaction(
-        walletAddress as Address,
-        to as Address,
+      walletAddress as Address,
+      to as Address,
         parseEther(value).toString() as `0x${string}`,
         data as `0x${string}`,
         gasOption
-      );
+    );
       
       // Clean up challenge cookies
       cookieStore.delete('txChallenge');
       cookieStore.delete('txData');
 
-      return NextResponse.json({
-        success: true,
+    return NextResponse.json({
+      success: true,
         data: result
       });
     } catch (error) {
@@ -575,4 +546,21 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
+}
+
+// Helper to find the first position where two strings differ
+function findFirstDifferenceIndex(str1: string, str2: string): string {
+  const minLength = Math.min(str1.length, str2.length);
+  
+  for (let i = 0; i < minLength; i++) {
+    if (str1[i] !== str2[i]) {
+      return `Position ${i}: '${str1[i]}' vs '${str2[i]}'`;
+    }
+  }
+  
+  if (str1.length !== str2.length) {
+    return `Length mismatch: ${str1.length} vs ${str2.length}`;
+  }
+  
+  return 'Identical';
 } 
