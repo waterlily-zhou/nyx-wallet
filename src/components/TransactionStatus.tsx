@@ -22,9 +22,11 @@ interface TransactionStatusProps {
 
 interface TransactionResult {
   success: boolean;
+  error?: string;
+  txHash?: string;
+  message?: string;
   userOpHash?: string;
   explorerUrl?: string;
-  error?: string;
 }
 
 // Global flag to track if WebAuthn is in progress across all component instances
@@ -53,6 +55,10 @@ export default function TransactionStatus({
   const hasStartedRef = useRef(false);
   const transactionIdRef = useRef<string | null>(null);
   const pendingChallengeRef = useRef<any>(null);
+  const hasStartedTransaction = useRef(false);
+  const isAuthenticated = useRef(false);
+  const abortControllerRef = useRef<AbortController | null>(null);
+  const challengeRef = useRef<any>(null);
 
   // Debug effect for visibility changes
   useEffect(() => {
@@ -73,6 +79,15 @@ export default function TransactionStatus({
     console.log(`📱 [TX] Component mounted. Visible: ${visible}, gasOption: ${gasOption}`);
     console.log(`📱 [TX] Transaction details:`, JSON.stringify(transactionDetails));
     
+    // Check WebAuthn availability
+    checkWebAuthnAvailability();
+    
+    // Generate a consistent transaction ID that stays stable for this component instance
+    if (!transactionIdRef.current) {
+      transactionIdRef.current = generateUUID();
+      console.log(`🆔 [TX] Generated stable transaction ID: ${transactionIdRef.current}`);
+    }
+    
     return () => {
       // Important: Release global WebAuthn lock when unmounting if this component owns it
       if (globalWebAuthnInProgress && hasStartedRef.current) {
@@ -81,17 +96,120 @@ export default function TransactionStatus({
         setTransactionInProgress(false);
       }
       
+      // Cancel any in-progress WebAuthn operations
+      if (abortControllerRef.current) {
+        console.log(`🛑 [TX] Aborting any in-progress operations on unmount`);
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+      
+      // Clear all refs and state
+      console.log(`🧹 [TX] Cleaning up on unmount`);
+      pendingChallengeRef.current = null;
+      challengeRef.current = null;
+      hasStartedRef.current = false;
+      hasStartedTransaction.current = false;
+      isAuthenticated.current = false;
+      
       isMountedRef.current = false;
     };
   }, []);
 
+  // Function to check if WebAuthn is available in this browser
+  const checkWebAuthnAvailability = () => {
+    console.log('⚙️ [WebAuthn] Checking availability...');
+    
+    try {
+      // Check if running in a secure context
+      if (window.isSecureContext) {
+        console.log('✅ [WebAuthn] Running in a secure context');
+      } else {
+        console.error('❌ [WebAuthn] Not running in a secure context. WebAuthn requires HTTPS (or localhost)');
+      }
+      
+      // Check for cross-origin issues
+      try {
+        const currentOrigin = window.location.origin;
+        console.log(`✅ [WebAuthn] Current origin: ${currentOrigin}`);
+      } catch (originError) {
+        console.error('❌ [WebAuthn] Error accessing origin:', originError);
+      }
+      
+      // Check if PublicKeyCredential is available
+      if (window.PublicKeyCredential) {
+        console.log('✅ [WebAuthn] PublicKeyCredential API is available');
+        
+        // Check if conditional mediation is supported (for autofill)
+        if ('conditional' in window.PublicKeyCredential) {
+          console.log('✅ [WebAuthn] Conditional mediation is supported');
+        } else {
+          console.log('ℹ️ [WebAuthn] Conditional mediation is not supported');
+        }
+        
+        // Check if user verification is available
+        if ('isUserVerifyingPlatformAuthenticatorAvailable' in window.PublicKeyCredential) {
+          window.PublicKeyCredential.isUserVerifyingPlatformAuthenticatorAvailable()
+            .then(available => {
+              if (available) {
+                console.log('✅ [WebAuthn] Platform authenticator is available');
+              } else {
+                console.log('ℹ️ [WebAuthn] Platform authenticator is not available');
+              }
+            })
+            .catch(err => {
+              console.error('❌ [WebAuthn] Error checking platform authenticator:', err);
+            });
+        }
+      } else {
+        console.error('❌ [WebAuthn] PublicKeyCredential API is not available in this browser');
+        return false;
+      }
+      
+      // Check if navigator.credentials.get exists
+      if (navigator.credentials && typeof navigator.credentials.get === 'function') {
+        console.log('✅ [WebAuthn] navigator.credentials.get is available');
+      } else {
+        console.error('❌ [WebAuthn] navigator.credentials.get is not available');
+        return false;
+      }
+      
+      return true;
+    } catch (error) {
+      console.error('❌ [WebAuthn] Error checking availability:', error);
+      return false;
+    }
+  };
+
   // Visibility change handler
   useEffect(() => {
-    console.log(`👁️ [TX] Visibility changed to: ${visible}`);
+    console.log(`👁️ [TX] Visibility changed to: ${visible}, transaction ID: ${transactionIdRef.current}`);
+    
+    // Start transaction when component becomes visible and hasn't started yet
+    if (visible && !hasStartedRef.current && transactionDetails && walletAddress) {
+      console.log(`🚀 [TX] Starting transaction with ID: ${transactionIdRef.current}`);
+      
+      // Generate a transaction ID if we don't have one
+      if (!transactionIdRef.current) {
+        transactionIdRef.current = generateUUID();
+      }
+      
+      hasStartedRef.current = true;
+      hasStartedTransaction.current = true;
+      
+      // Start the transaction
+      prepareTransaction();
+    }
     
     // Clean up when visibility is turned off
     if (!visible && hasStartedRef.current) {
       console.log(`🧹 [TX] Transaction flow cleanup due to visibility change`);
+      
+      // Cancel any in-progress operations
+      if (abortControllerRef.current) {
+        console.log(`🛑 [TX] Aborting in-progress operations due to visibility change`);
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
       
       // Release WebAuthn lock if we own it
       if (globalWebAuthnInProgress) {
@@ -100,143 +218,57 @@ export default function TransactionStatus({
         setTransactionInProgress(false);
       }
       
+      // Reset all transaction state
       hasStartedRef.current = false;
-      transactionIdRef.current = null;
+      hasStartedTransaction.current = false;
+      isAuthenticated.current = false;
       pendingChallengeRef.current = null;
+      challengeRef.current = null;
+      
+      // Reset displayed status (will be hidden anyway due to !visible in render)
+      setStatus('submitting');
     }
-  }, [visible, setTransactionInProgress]);
+  }, [visible, transactionDetails, walletAddress, setTransactionInProgress]);
 
-  // Main transaction effect - only triggered when component becomes visible and hasn't started yet
+  // Main transaction effect - handles WebAuthn flow once challenge is fetched
   useEffect(() => {
-    if (!visible || hasStartedRef.current || !isMountedRef.current) {
+    // We only run this for WebAuthn authentication after the challenge is fetched
+    // The transaction starting is now managed by the visibility effect
+    if (!visible || !isMountedRef.current) {
       return;
     }
     
-    // Generate a unique transaction ID for tracing using the context
-    const txId = getCurrentTransactionId() || generateTransactionId();
-    console.log(`🚀 [TX] Starting transaction flow ${txId}`);
-    transactionIdRef.current = txId;
-    hasStartedRef.current = true;
-    
-    // Main transaction function - ONLY fetch challenge, don't do WebAuthn here
-    const prepareTransaction = async () => {
-      try {
-        // Check if we're resuming a transaction first
-        if (transactionIdRef.current && pendingChallengeRef.current) {
-          console.log(`🔄 [TX] Skipping challenge fetch - resuming transaction ${transactionIdRef.current}`);
-          
-          // Just update the status if needed and return
-          if (status !== 'authenticating') {
-            setStatus('authenticating');
-          }
-          return;
-        }
-        
-        // Set initial status
-        setStatus('submitting');
-        
-        // 1. Check for global WebAuthn lock before proceeding
-        if (globalWebAuthnInProgress) {
-          console.log(`⚠️ [TX] ${txId}: Global WebAuthn already in progress, cannot start new transaction`);
-          throw new Error('Another authentication is already in progress. Please try again in a moment.');
-        }
-        
-        // 2. Fetch transaction challenge
-        console.log(`🔍 [TX] ${txId}: Requesting transaction challenge`);
-        const challengeRes = await fetch('/api/auth/transaction-challenge', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            to: transactionDetails.recipient,
-            value: transactionDetails.amount,
-            data: '0x',
-            includeDeviceKey: true
-          })
-        });
-
-        // 3. Validate challenge response
-        if (!challengeRes.ok) {
-          console.error(`❌ [TX] ${txId}: Challenge request failed:`, await challengeRes.text());
-          throw new Error('Failed to get transaction challenge');
-        }
-        
-        // 4. Parse challenge data
-        const challengeData = await challengeRes.json();
-        console.log(`✅ [TX] ${txId}: Challenge received, preparing WebAuthn flow`);
-        pendingChallengeRef.current = challengeData;
-        
-        // 5. Final validation before setting authenticating status
-        if (!isMountedRef.current) {
-          console.log(`🛑 [TX] ${txId}: Transaction aborted before WebAuthn - component not mounted`);
-          return;
-        }
-        
-        // 6. Set WebAuthn UI state - don't set global lock here yet
-        setStatus('authenticating');
-        console.log(`🔐 [TX] ${txId}: Setting status to authenticating, txId is stable`);
-        
-      } catch (err: any) {
-        // Only update UI if component is still mounted and this transaction is still relevant
-        if (isMountedRef.current && transactionIdRef.current === txId) {
-          console.error(`❌ [TX] ${txId}: Error in transaction preparation:`, err);
-          setStatus('error');
-          setResult({ 
-            success: false, 
-            error: err.message || 'Error preparing transaction' 
-          });
-        }
-      }
-    };
-
-    // Start the transaction preparation
-    prepareTransaction();
-  }, [visible, transactionDetails?.recipient, transactionDetails?.amount, getCurrentTransactionId, generateTransactionId]); // Minimal dependencies
-
-  // Create a separate WebAuthn dedicated effect that only runs when status is 'authenticating' and txId is set
-  useEffect(() => {
-    // Only run the WebAuthn flow when we're in authenticating state and all prerequisites are met
-    if (status !== 'authenticating') {
+    // Skip if we don't have challenge data or if transaction hasn't started
+    if (!pendingChallengeRef.current || !hasStartedTransaction.current) {
       return;
     }
     
-    // Check if we have the challenge data and transaction ID
-    if (!pendingChallengeRef.current || !transactionIdRef.current) {
-      console.log('[WebAuthn] Missing challenge data or txId, cannot proceed', {
-        hasPendingChallenge: !!pendingChallengeRef.current,
-        hasTxId: !!transactionIdRef.current
-      });
+    // If status is already authenticating and we have pendingChallenge, 
+    // we should proceed with WebAuthn
+    if (status === 'authenticating' && pendingChallengeRef.current) {
+      console.log(`[TX] Status is authenticating and we have challenge, proceeding with WebAuthn`);
+    } else {
+      // Otherwise, just wait for the authentication status to be set by the visibility effect
       return;
     }
     
-    // Other checks can be more lenient as we may have recovered from global state
-    if (!visible || !transactionDetails || !walletAddress) {
-      console.log('[WebAuthn] Missing required props, pausing WebAuthn flow', {
-        visible,
-        hasTransactionDetails: !!transactionDetails,
-        hasWalletAddress: !!walletAddress
-      });
-      return;
-    }
-    
-    console.log(`[WebAuthn] Preparing to launch WebAuthn for ${transactionIdRef.current}`, {
-      status,
-      visible,
-      hasTransactionId: !!transactionIdRef.current,
-      hasPendingChallenge: !!pendingChallengeRef.current
-    });
-    
-    // Don't do anything if WebAuthn is already in progress
+    // Check global lock before proceeding
     if (globalWebAuthnInProgress) {
-      console.log(`⚠️ [TX] WebAuthn already in progress, skipping duplicate request`);
+      console.log(`[TX] Global WebAuthn in progress, waiting...`);
       return;
     }
     
+    // Main WebAuthn handler
     const doWebAuthn = async () => {
       const challengeData = pendingChallengeRef.current;
       const txId = transactionIdRef.current;
       
       if (!challengeData || !txId) {
-        console.error('[WebAuthn] Missing challenge data or txId, cannot proceed');
+        console.error('[WebAuthn] Missing challenge data or txId, cannot proceed', {
+          hasChallengeData: !!challengeData,
+          txId,
+          challengeOptions: challengeData?.options ? 'exists' : 'missing'
+        });
         return;
       }
       
@@ -246,13 +278,69 @@ export default function TransactionStatus({
         setTransactionInProgress(true);
         console.log(`🔒 [TX] Starting WebAuthn with stable txId: ${txId}`);
         
-        // The actual WebAuthn call
-        console.log('[WebAuthn] Launching navigator.credentials.get...');
-        const webAuthnResponse = await startAuthentication({ 
-          optionsJSON: challengeData.options 
+        // Log full challenge data for debugging
+        console.log('[WebAuthn] Challenge data:', {
+          challenge: challengeData.challenge ? challengeData.challenge.slice(0, 20) + '...' : 'missing',
+          optionsExists: !!challengeData.options,
+          optionsKeys: challengeData.options ? Object.keys(challengeData.options) : [],
+          fullOptions: challengeData.options
         });
         
-        console.log(`✅ [TX] ${txId}: WebAuthn authentication completed successfully`);
+        // The actual WebAuthn call - ensure options are properly formatted
+        console.log('[WebAuthn] Launching navigator.credentials.get...');
+        
+        let webAuthnResponse: any;
+        
+        try {
+          // Direct WebAuthn call with simplified options to ensure it's called
+          webAuthnResponse = await startAuthentication({ 
+            optionsJSON: challengeData.options 
+          });
+          
+          console.log(`✅ [TX] ${txId}: WebAuthn authentication completed successfully`, {
+            responseType: typeof webAuthnResponse,
+            responseKeys: Object.keys(webAuthnResponse || {})
+          });
+          isAuthenticated.current = true;
+        } catch (error: any) {
+          console.error('[WebAuthn] Error during navigator.credentials.get call:', {
+            error,
+            name: error.name,
+            message: error.message
+          });
+          
+          // Try a fallback with a simple structure if the original options fail
+          if (challengeData.options && challengeData.options.challenge) {
+            try {
+              console.log('[WebAuthn] Attempting fallback authentication...');
+              
+              // Create a simplified version of the options
+              const simplifiedOptions = {
+                challenge: challengeData.options.challenge,
+                allowCredentials: challengeData.options.allowCredentials,
+                rpId: challengeData.options.rpId || window.location.hostname,
+                timeout: 60000,
+                userVerification: "required" as const
+              };
+              
+              webAuthnResponse = await startAuthentication({ 
+                optionsJSON: simplifiedOptions 
+              });
+              
+              console.log(`✅ [TX] ${txId}: WebAuthn fallback authentication successful`);
+              isAuthenticated.current = true;
+            } catch (fallbackError: any) {
+              console.error('[WebAuthn] Fallback authentication also failed:', {
+                error: fallbackError,
+                name: fallbackError.name,
+                message: fallbackError.message
+              });
+              throw fallbackError;
+            }
+          } else {
+            throw error;
+          }
+        }
         
         // Verification check after WebAuthn completes
         if (!isMountedRef.current) {
@@ -260,6 +348,11 @@ export default function TransactionStatus({
           globalWebAuthnInProgress = false;
           setTransactionInProgress(false);
           return;
+        }
+        
+        // Check if we have a valid WebAuthn response
+        if (!webAuthnResponse) {
+          throw new Error('WebAuthn authentication failed - no response received');
         }
         
         // Update UI state
@@ -278,7 +371,8 @@ export default function TransactionStatus({
             gasPaymentMethod: gasOption,
             webAuthnResponse,
             transactionChallenge: challengeData.challenge
-          })
+          }),
+          signal: abortControllerRef.current?.signal
         });
         
         // Parse server response
@@ -304,7 +398,9 @@ export default function TransactionStatus({
         setResult({
           success: true,
           userOpHash: data.data?.userOpHash,
-          explorerUrl: data.data?.explorerUrl
+          explorerUrl: data.data?.explorerUrl,
+          txHash: data.data?.txHash,
+          message: data.data?.message
         });
         
       } catch (webAuthnError: any) {
@@ -315,28 +411,66 @@ export default function TransactionStatus({
           type: typeof webAuthnError,
           stack: webAuthnError.stack?.slice(0, 200) || 'No stack trace',
           isAbortError: webAuthnError.name === 'AbortError',
-          isNotAllowedError: webAuthnError.name === 'NotAllowedError'
+          isNotAllowedError: webAuthnError.name === 'NotAllowedError',
+          isOperationError: webAuthnError.name === 'OperationError'
         });
         
-        if (isMountedRef.current && transactionIdRef.current === txId) {
-          setStatus('error');
-          setResult({
-            success: false,
-            error: webAuthnError.name === 'AbortError' 
-              ? 'Authentication was aborted. Please try again.' 
-              : webAuthnError.message || 'Authentication failed'
-          });
+        // Check if this is a user cancellation or abort error
+        const isAbortOrCancel = 
+          webAuthnError.name === 'AbortError' || 
+          webAuthnError.name === 'NotAllowedError' ||
+          (webAuthnError.message && webAuthnError.message.toLowerCase().includes('abort')) ||
+          (webAuthnError.message && webAuthnError.message.toLowerCase().includes('cancel'));
+        
+        // Map WebAuthn errors to user-friendly messages
+        let userMessage = 'Authentication failed';
+        if (isAbortOrCancel) {
+          userMessage = 'Authentication was cancelled. Please try again.';
+        } else if (webAuthnError.name === 'InvalidStateError') {
+          userMessage = 'Browser is in an invalid state. Please refresh the page and try again.';
+        } else if (webAuthnError.name === 'SecurityError') {
+          userMessage = 'Security error: The operation is insecure. Try using HTTPS or localhost.';
+        } else if (webAuthnError.name === 'NetworkError') {
+          userMessage = 'Network error occurred. Please check your connection and try again.';
+        } else if (webAuthnError.message) {
+          // Use the error message if available
+          userMessage = webAuthnError.message;
+        }
+        
+        if (isMountedRef.current) {
+          // Only show error UI if it's not a simple abort/cancel
+          if (!isAbortOrCancel) {
+            setStatus('error');
+            setResult({
+              success: false,
+              error: userMessage
+            });
+          } else {
+            // For cancellations, reset state to let user retry
+            console.log('⚠️ [TX] WebAuthn was cancelled or aborted by user');
+            setStatus('authenticating');
+            // Clear challenge data to prevent auto-restart
+            pendingChallengeRef.current = null;
+          }
+          
+          // Reset transaction state to allow retry
+          hasStartedRef.current = false;
+          hasStartedTransaction.current = false;
+          isAuthenticated.current = false;
         }
       } finally {
         globalWebAuthnInProgress = false;
         setTransactionInProgress(false);
         console.log(`🔓 [TX] Released global WebAuthn lock for ${txId}`);
+        
+        // Clear the abort controller after completion
+        abortControllerRef.current = null;
       }
     };
     
     console.log(`[WebAuthn] Starting WebAuthn flow for stable txId: ${transactionIdRef.current}`);
     doWebAuthn();
-  }, [status, transactionDetails, walletAddress, visible, gasOption, setTransactionInProgress]);
+  }, [visible, status, transactionDetails, walletAddress, gasOption, setTransactionInProgress]);
 
   // Add an effect to synchronize with context state on mount or visibility change
   useEffect(() => {
@@ -353,12 +487,289 @@ export default function TransactionStatus({
     }
   }, [visible, currentStep, status]);
 
+  // Reset the status when component visibility changes
+  useEffect(() => {
+    console.log('TransactionStatus visibility changed:', visible);
+    
+    if (visible) {
+      // Only reset state when component becomes visible from an invisible state 
+      // AND we don't have an ongoing transaction AND we don't have pending challenge
+      if (!hasStartedRef.current && !hasStartedTransaction.current && !pendingChallengeRef.current) {
+        console.log('Resetting status on becoming visible (no transaction in progress)');
+        
+        if (status !== 'submitting') {
+          console.log('Setting status to submitting');
+          setStatus('submitting');
+        }
+        
+        if (result !== null) {
+          console.log('Clearing previous transaction result');
+          setResult(null);
+        }
+      } else {
+        console.log('Not resetting status on visibility change - transaction in progress or challenge pending', {
+          hasStarted: hasStartedRef.current,
+          hasStartedTransaction: hasStartedTransaction.current,
+          hasPendingChallenge: !!pendingChallengeRef.current
+        });
+      }
+    }
+  }, [visible, status, result]);
+
+  // Initialize component state and verify WebAuthn when mounted
+  useEffect(() => {
+    console.log('🔄 [TX] TransactionStatus component mounted');
+    // Check WebAuthn availability on mount
+    const webAuthnAvailable = checkWebAuthnAvailability();
+    console.log(`🔄 [TX] WebAuthn availability: ${webAuthnAvailable ? 'Available' : 'Not available'}`);
+    
+    // Start transaction if component is visible and we haven't started yet
+    if (visible && !hasStartedRef.current) {
+      hasStartedRef.current = true;
+      const txId = generateUUID();
+      console.log(`🔄 [TX] Starting transaction with ID: ${txId}`);
+      transactionIdRef.current = txId;
+      prepareTransaction();
+    }
+    
+    return () => {
+      console.log('🔄 [TX] TransactionStatus component unmounting');
+    };
+  }, [visible]);
+
+  // Clear WebAuthn state when challenge changes
+  useEffect(() => {
+    if (challengeRef.current) {
+      console.log('🔄 [TX] Got new challenge, preparing WebAuthn options');
+      
+      // Log challenge format for debugging
+      console.log('🔍 [WebAuthn] Challenge options:', JSON.stringify({
+        options: challengeRef.current,
+        allowCredentialsCount: challengeRef.current?.allowCredentials?.length || 0,
+        hasChallenge: !!challengeRef.current?.challenge,
+        challengeLength: challengeRef.current?.challenge ? challengeRef.current.challenge.length : 0
+      }));
+      
+      // Attempt immediate WebAuthn start if appropriate
+      if (status === 'authenticating' && challengeRef.current) {
+        console.log('🔄 [TX] Attempting immediate WebAuthn start');
+        attemptWebAuthnStart();
+      }
+    }
+  }, [challengeRef.current, status]);
+
+  // Effect for component unmount cleanup
+  useEffect(() => {
+    return () => {
+      console.log('[TransactionStatus] Component fully unmounted - resetting state');
+      
+      // Reset transaction state when component fully unmounts
+      hasStartedTransaction.current = false;
+      isAuthenticated.current = false;
+      if (abortControllerRef.current) {
+        console.log('[TransactionStatus] Aborting any pending transactions');
+        abortControllerRef.current.abort();
+        abortControllerRef.current = null;
+      }
+    };
+  }, []);
+
+  // Generate a UUID for transaction tracking
+  const generateUUID = (): string => {
+    return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, (c) => {
+      const r = (Math.random() * 16) | 0;
+      const v = c === 'x' ? r : (r & 0x3) | 0x8;
+      return v.toString(16);
+    });
+  };
+
+  // Prepare the transaction by fetching challenge and setting up WebAuthn
+  const prepareTransaction = async () => {
+    try {
+      // Check for global WebAuthn lock before proceeding
+      if (globalWebAuthnInProgress) {
+        console.log(`⚠️ [TX] Global WebAuthn already in progress, cannot start new transaction`);
+        throw new Error('Another authentication is already in progress. Please try again in a moment.');
+      }
+      
+      // Set the status to submitting immediately
+      setStatus('submitting');
+      
+      // Fetch transaction challenge
+      console.log(`🔍 [TX] ${transactionIdRef.current}: Requesting transaction challenge`);
+      
+      try {
+        const challengeRes = await fetch('/api/auth/transaction-challenge', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            to: transactionDetails.recipient,
+            value: transactionDetails.amount,
+            data: '0x',
+            includeDeviceKey: true
+          })
+        });
+
+        // Validate challenge response
+        if (!challengeRes.ok) {
+          console.error(`❌ [TX] ${transactionIdRef.current}: Challenge request failed:`, await challengeRes.text());
+          throw new Error('Failed to get transaction challenge');
+        }
+        
+        // Parse challenge data
+        const challengeData = await challengeRes.json();
+        console.log(`✅ [TX] ${transactionIdRef.current}: Challenge received:`, {
+          success: challengeData.success,
+          hasChallenge: !!challengeData.challenge,
+          hasOptions: !!challengeData.options,
+          optionsPreview: challengeData.options ? 
+            Object.keys(challengeData.options).join(', ') : 'none'
+        });
+        
+        // Store the challenge data for the WebAuthn effect
+        challengeRef.current = challengeData.options;
+        pendingChallengeRef.current = challengeData;
+        
+        // Check if we have valid challenge data
+        if (!challengeData.options || !challengeData.challenge) {
+          console.error(`❌ [TX] ${transactionIdRef.current}: Invalid challenge data received`);
+          throw new Error('Invalid challenge data received from server');
+        }
+        
+        // Set WebAuthn UI state immediately
+        console.log(`🔐 [TX] ${transactionIdRef.current}: Setting status to authenticating`);
+        setStatus('authenticating');
+        
+        // Important: Set the flag to indicate transaction has started to prevent re-triggers
+        hasStartedTransaction.current = true;
+        
+        // Directly attempt to start WebAuthn authentication now that we have the challenge
+        // This provides immediate authentication rather than waiting for the effect
+        console.log(`🔐 [TX] ${transactionIdRef.current}: Directly starting WebAuthn with challenge`);
+        setTimeout(() => {
+          attemptWebAuthnStart();
+        }, 100); // Small delay to ensure state updates are processed first
+        
+      } catch (err) {
+        console.error(`❌ [TX] Error fetching challenge:`, err);
+        throw err;
+      }
+      
+    } catch (err) {
+      console.error(`❌ [TX] Error starting transaction:`, err);
+      setStatus('error');
+      setResult({ 
+        success: false, 
+        error: err instanceof Error ? err.message : 'Failed to start transaction' 
+      });
+    }
+  };
+
+  // Attempt to start WebAuthn authentication with current challenge
+  const attemptWebAuthnStart = async () => {
+    try {
+      if (!challengeRef.current) {
+        console.error('❌ [WebAuthn] Cannot start - no challenge available');
+        return;
+      }
+
+      console.log('[WebAuthn] Starting authentication with options:', challengeRef.current);
+      
+      // Create a new abort controller for this attempt
+      abortControllerRef.current = new AbortController();
+      
+      try {
+        // Try the library approach first
+        console.log('[WebAuthn] Attempting with simplewebauthn library...');
+        const response = await startAuthentication({ 
+          optionsJSON: challengeRef.current 
+        });
+        
+        console.log('✅ [WebAuthn] Authentication completed!', response);
+        
+        // Handle the successful response by sending it to the server
+        await submitSignedTransaction(response);
+        
+      } catch (libError: any) {
+        console.error('[WebAuthn] Library approach failed:', {
+          error: libError,
+          name: libError?.name,
+          message: libError?.message
+        });
+        
+        // If it's an AbortError, don't treat as a failure
+        if (libError?.name === 'AbortError') {
+          console.log('[WebAuthn] Authentication was aborted by user or system');
+          return;
+        }
+        
+        // For non-abort errors, set error state
+        setStatus('error');
+        setResult({
+          success: false,
+          error: libError?.message || 'Authentication failed'
+        });
+      }
+    } catch (err) {
+      console.error('❌ [WebAuthn] Error during authentication:', err);
+      setStatus('error');
+      setResult({
+        success: false,
+        error: err instanceof Error ? err.message : 'Authentication failed'
+      });
+    }
+  };
+
+  // Submit the signed transaction to the server
+  const submitSignedTransaction = async (webAuthnResponse: any) => {
+    try {
+      console.log(`🔐 [TX] ${transactionIdRef.current}: Submitting signed transaction`);
+      
+      const response = await fetch('/api/transaction/send', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          to: transactionDetails.recipient,
+          value: transactionDetails.amount,
+          webauthnResponse: webAuthnResponse,
+          gasOption: gasOption
+        }),
+      });
+
+      if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`❌ [TX] ${transactionIdRef.current}: Transaction failed:`, errorText);
+        throw new Error(`Transaction failed: ${errorText}`);
+      }
+
+      const data = await response.json();
+      console.log(`✅ [TX] ${transactionIdRef.current}: Transaction succeeded:`, data);
+      
+      setStatus('success');
+      setResult({
+        success: true,
+        txHash: data.txHash || 'unknown',
+        message: 'Transaction submitted successfully!'
+      });
+      
+    } catch (error) {
+      console.error(`❌ [TX] ${transactionIdRef.current}: Error submitting transaction:`, error);
+      setStatus('error');
+      setResult({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to submit transaction'
+      });
+    }
+  };
+
   // Don't render anything when not visible
   if (!visible) return null;
 
   // UI based on current transaction status
   return (
-    <div className="w-full max-w-lg mx-auto text-center">
+    <div className={`w-full max-w-lg mx-auto text-center ${visible ? 'transaction-status-active' : 'transaction-status-hidden'}`}>
       {status === 'submitting' || status === 'authenticating' ? (
         // Loading state
         <div className="space-y-8">
@@ -453,13 +864,25 @@ export default function TransactionStatus({
                   setTransactionInProgress(false);
                 }
                 
+                // Reset all transaction state flags
                 hasStartedRef.current = false;
                 transactionIdRef.current = null;
                 pendingChallengeRef.current = null;
+                hasStartedTransaction.current = false;
+                isAuthenticated.current = false;
+                
+                // Abort any pending network requests
+                if (abortControllerRef.current) {
+                  console.log('[TransactionStatus] Aborting any pending requests on retry');
+                  abortControllerRef.current.abort();
+                  abortControllerRef.current = null;
+                }
                 
                 // Reset UI state
                 setStatus('submitting');
                 setResult(null);
+                
+                console.log('[TransactionStatus] State reset for retry, transaction will restart');
               }}
               className="px-6 py-3 bg-violet-600 text-white font-medium rounded-lg hover:bg-violet-700"
             >

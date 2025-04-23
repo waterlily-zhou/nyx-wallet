@@ -68,9 +68,17 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
     try {
       console.log('Attempting to load transaction state from localStorage');
       const savedState = localStorage.getItem(STORAGE_KEY);
+      
+      // Don't clear localStorage here - only clear it when transaction finishes or is canceled
+      // This prevents component cycle remounting issues with WebAuthn
+      
       if (savedState) {
         const parsed = JSON.parse(savedState);
         console.log('Successfully loaded transaction state:', parsed);
+        
+        // Don't reset to create step - maintain the existing step
+        // This prevents breaking WebAuthn flow which requires component stability
+        
         return parsed;
       }
       console.log('No saved transaction state found in localStorage');
@@ -217,6 +225,12 @@ export function TransactionProvider({ children }: { children: ReactNode }) {
       setTransactionDetails(null);
       setGasOption('default');
       currentTransactionIdRef.current = null;
+      
+      // Now it's safe to clear localStorage
+      if (typeof window !== 'undefined') {
+        console.log('Transaction complete or canceled - clearing localStorage state');
+        localStorage.removeItem(STORAGE_KEY);
+      }
       
       // Save reset state immediately
       saveStateToStorage({

@@ -313,24 +313,28 @@ export async function POST(request: NextRequest) {
       const clientDataJSON = Buffer.from(webAuthnResponse.response.clientDataJSON, 'base64').toString();
       const clientData = JSON.parse(clientDataJSON);
       
-      // The challenge in clientData is base64-encoded, so we need to decode it
-      const receivedChallenge = Buffer.from(clientData.challenge, 'base64').toString();
-      
-      console.log('🔍 Challenge Processing:', {
+      // Log the decoded client data for debugging
+      console.log('🔍 Client Data:', {
         type: clientData.type,
         origin: clientData.origin,
-        rawChallenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing',
-        decodedChallenge: receivedChallenge ? `${receivedChallenge.substring(0, 10)}...` : 'missing',
-        storedChallenge: txChallenge ? `${txChallenge.substring(0, 10)}...` : 'missing'
+        challenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing'
+      });
+      
+      console.log('🔍 Challenge Processing:', {
+        rawClientChallenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing',
+        storedChallenge: txChallenge ? `${txChallenge.substring(0, 10)}...` : 'missing',
+        clientChallengeLength: clientData.challenge?.length,
+        storedChallengeLength: txChallenge?.length
       });
 
-      // Compare the decoded challenge with our stored challenge
-      if (receivedChallenge !== txChallenge) {
+      // IMPORTANT: Fix for challenge comparison - use the raw clientData.challenge
+      // The browser already encoded this correctly, so we should compare directly with stored value
+      if (clientData.challenge !== txChallenge) {
         console.log('❌ Challenge mismatch:', {
           stored: txChallenge,
-          received: receivedChallenge,
+          received: clientData.challenge,
           storedLength: txChallenge?.length,
-          receivedLength: receivedChallenge?.length
+          receivedLength: clientData.challenge?.length
         });
         throw new Error('Challenge mismatch');
       }

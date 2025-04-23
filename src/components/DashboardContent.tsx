@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { parseEther, formatEther } from 'viem';
 import TransactionFlow from './TransactionFlow';
 import { createPublicClientForSepolia } from '@/lib/client-setup';
+import { useTransaction } from '@/contexts/TransactionContext';
 
 interface Asset {
   type: 'native' | 'erc20';
@@ -32,6 +33,9 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const [networkInfo, setNetworkInfo] = useState<any>(null);
   const [isWalletReady, setIsWalletReady] = useState(false);
   
+  // Get the resetTransaction function from the context
+  const { resetTransaction } = useTransaction();
+
   useEffect(() => {
     if (walletAddress) {
       checkWalletStatus();
@@ -150,6 +154,10 @@ export default function DashboardContent({ walletAddress }: DashboardContentProp
   const handleSendClick = () => {
     try {
       console.log('Opening transaction flow...');
+
+      // Reset the transaction state first to ensure we start from the beginning
+      resetTransaction();
+      
       // Force a state update in the parent component to prevent unmounting issues
       setTimeout(() => {
         setShowTransactionFlow(true);
