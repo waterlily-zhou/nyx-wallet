@@ -368,9 +368,8 @@ export default function TransactionStatus({
             to: transactionDetails.recipient,
             value: transactionDetails.amount,
             data: '0x',
-            gasPaymentMethod: gasOption,
-            webAuthnResponse,
-            transactionChallenge: challengeData.challenge
+            gasOption: gasOption,
+            webauthnResponse: webAuthnResponse
           }),
           signal: abortControllerRef.current?.signal
         });
@@ -391,7 +390,7 @@ export default function TransactionStatus({
           console.error(`❌ [TX] ${txId}: Server returned error:`, data);
           throw new Error(data.error || 'Transaction failed');
         }
-        
+
         // Success path
         console.log(`✅ [TX] ${txId}: Transaction completed successfully!`);
         setStatus('success');
@@ -402,6 +401,7 @@ export default function TransactionStatus({
           txHash: data.data?.txHash,
           message: data.data?.message
         });
+        pendingChallengeRef.current = null; 
         
       } catch (webAuthnError: any) {
         console.error(`❌ [TX] WebAuthn error:`, {
@@ -479,7 +479,7 @@ export default function TransactionStatus({
     // If we're becoming visible and the context already indicates we're in a specific step,
     // ensure our internal status matches the external state
     if (visible) {
-      if (currentStep === 'complete' && status !== 'authenticating' && status !== 'success') {
+      if (currentStep === 'complete' && status == 'submitting') {
         // If context says we're in complete step, we should be in authenticating
         // unless we've already succeeded
         setStatus('authenticating');
@@ -717,6 +717,7 @@ export default function TransactionStatus({
         success: false,
         error: err instanceof Error ? err.message : 'Authentication failed'
       });
+      pendingChallengeRef.current = null; 
     }
   };
 
@@ -733,8 +734,9 @@ export default function TransactionStatus({
         body: JSON.stringify({
           to: transactionDetails.recipient,
           value: transactionDetails.amount,
-          webauthnResponse: webAuthnResponse,
-          gasOption: gasOption
+          data: '0x',
+          gasOption: gasOption,
+          webauthnResponse: webAuthnResponse
         }),
       });
 
@@ -753,6 +755,7 @@ export default function TransactionStatus({
         txHash: data.txHash || 'unknown',
         message: 'Transaction submitted successfully!'
       });
+      pendingChallengeRef.current = null;
       
     } catch (error) {
       console.error(`❌ [TX] ${transactionIdRef.current}: Error submitting transaction:`, error);
@@ -761,6 +764,7 @@ export default function TransactionStatus({
         success: false,
         error: error instanceof Error ? error.message : 'Failed to submit transaction'
       });
+      pendingChallengeRef.current = null; 
     }
   };
 
@@ -801,23 +805,23 @@ export default function TransactionStatus({
           </p>
           
           {result?.userOpHash && (
-            <div className="p-4 bg-gray-900 rounded-lg inline-block mx-auto text-center mt-4">
-              <p className="text-sm text-gray-400 mb-2">Transaction Hash:</p>
-              <p className="font-mono text-sm break-all">{result.userOpHash}</p>
-            </div>
+          <div className="p-4 bg-gray-900 rounded-lg inline-block mx-auto text-center mt-4">
+            <p className="text-sm text-gray-400 mb-2">Transaction Hash:</p>
+            <p className="font-mono text-sm break-all">{result.userOpHash}</p>
+          </div>
           )}
           
           {result?.explorerUrl && (
-            <div>
-              <button
+          <div>
+            <button
                 onClick={() => window.open(result.explorerUrl, '_blank')}
-                className="text-violet-400 hover:text-violet-300 flex items-center justify-center mx-auto"
-              >
-                <span>Check on</span>
-                <span className="ml-1">→</span>
-                <span className="ml-1">Etherscan</span>
-              </button>
-            </div>
+              className="text-violet-400 hover:text-violet-300 flex items-center justify-center mx-auto"
+            >
+              <span>Check on</span>
+              <span className="ml-1">→</span>
+              <span className="ml-1">Etherscan</span>
+            </button>
+          </div>
           )}
           
           <button
