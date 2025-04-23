@@ -135,71 +135,67 @@ function preparePublicKeyForVerification(key: string | Buffer): Buffer {
     if (Buffer.isBuffer(key)) return key;
     const keyString = key as string;
     
-    console.log('🔍 Preparing credential public key:', {
-      type: typeof keyString,
-      startsWithBackslashX: keyString.startsWith('\\x'),
-      length: keyString.length
-    });
-    
-    // PostgreSQL bytea format
+    // Handle PostgreSQL bytea format (\x...)
     if (keyString.startsWith('\\x')) {
+      console.log('✅ Detected PostgreSQL bytea format');
       const hexString = keyString.substring(2);
+      
+      // Convert hex to string
       let decodedString = '';
       for (let i = 0; i < hexString.length; i += 2) {
         decodedString += String.fromCharCode(parseInt(hexString.substring(i, i + 2), 16));
       }
       
-      // If it looks like base64-encoded JSON (eyI...)
+      // If it's base64-encoded JSON (eyI...)
       if (decodedString.startsWith('eyI')) {
         console.log('✅ Detected base64-encoded JSON in PostgreSQL bytea');
-        try {
-          // Decode the base64 to get the JSON string
-          const jsonString = Buffer.from(decodedString, 'base64').toString();
-          console.log('🔍 JSON string preview:', jsonString.substring(0, 50));
-          const jsonObj = JSON.parse(jsonString);
-          
-          // Create a proper COSE_Key Map for CBOR
-          const cbor = require('cbor');
-          const coseKeyMap = new Map();
-          
-          // Convert JSON object to Map with numeric keys
-          for (const [key, value] of Object.entries(jsonObj)) {
-            const numKey = !isNaN(Number(key)) ? Number(key) : key;
-            coseKeyMap.set(numKey, value);
-          }
-          
-          console.log('✅ Converting JSON to CBOR Map with keys:', 
-                     Array.from(coseKeyMap.keys()).join(', '));
-          return cbor.encode(coseKeyMap);
-        } catch (e) {
-          console.error('❌ Failed to process JSON from base64:', e);
-        }
-      }
-      
-      return Buffer.from(hexString, 'hex');
-    }
-    
-    // If it's a base64-encoded JSON string already (not in bytea)
-    if (keyString.startsWith('eyI')) {
-      console.log('✅ Detected base64-encoded JSON directly');
-      try {
-        const jsonString = Buffer.from(keyString, 'base64').toString();
+        
+        // Decode the base64 to get the JSON string
+        const jsonString = Buffer.from(decodedString, 'base64').toString();
+        console.log('🔍 JSON string preview:', jsonString.substring(0, 50));
+        
+        // Parse the JSON
         const jsonObj = JSON.parse(jsonString);
+        
+        // Create a proper COSE_Key Map for CBOR encoding
         const cbor = require('cbor');
         const coseKeyMap = new Map();
+        
+        // Convert JSON to Map with proper numeric keys
         for (const [key, value] of Object.entries(jsonObj)) {
-          coseKeyMap.set(!isNaN(Number(key)) ? Number(key) : key, value);
+          // Convert string keys to numbers where possible
+          const numKey = !isNaN(Number(key)) ? Number(key) : key;
+          coseKeyMap.set(numKey, value);
         }
-        return cbor.encode(coseKeyMap);
-      } catch (e) {
-        console.error('❌ Failed to process direct base64 JSON:', e);
+        
+        console.log('✅ Converting JSON to CBOR Map with keys:', Array.from(coseKeyMap.keys()).join(', '));
+        const encoded = cbor.encode(coseKeyMap);
+        console.log('✅ CBOR encoded, length:', encoded.length);
+        return encoded;
       }
     }
     
-    // Last resort - try as raw base64
+    // If it's direct base64-encoded JSON
+    if (keyString.startsWith('eyI')) {
+      console.log('✅ Direct base64-encoded JSON detected');
+      const jsonString = Buffer.from(keyString, 'base64').toString();
+      const jsonObj = JSON.parse(jsonString);
+      
+      const cbor = require('cbor');
+      const coseKeyMap = new Map();
+      for (const [key, value] of Object.entries(jsonObj)) {
+        const numKey = !isNaN(Number(key)) ? Number(key) : key;
+        coseKeyMap.set(numKey, value);
+      }
+      
+      return cbor.encode(coseKeyMap);
+    }
+    
+    // Last resort - try direct formats
+    console.log('⚠️ No special format detected, trying direct decoding');
     return Buffer.from(keyString, 'base64');
   } catch (e) {
-    console.error('❌ Failed to prepare public key:', e);
+    console.error('❌ Error preparing public key:', e);
     throw new Error('Failed to prepare credential public key');
   }
 }
