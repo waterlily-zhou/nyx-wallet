@@ -11,6 +11,10 @@ import { createSafeAccountClient } from '@/lib/wallet/safe-account';
 import { handleDeploymentBeforeTransaction } from '@/lib/wallet/deploy';
 import { privateKeyToAccount } from 'viem/accounts';
 import { createPublicClientForSepolia } from '@/lib/client-setup';
+import { generateAuthenticationOptions } from '@simplewebauthn/server';
+import { PublicKeyCredentialRequestOptionsJSON } from '@simplewebauthn/types';
+import { AuthenticatorTransportFuture } from '@simplewebauthn/types';
+import { toHash } from '@simplewebauthn/server/helpers';
 
 // Function to convert Map to plain object recursively
 function mapToPlainObject(input: any): any {
@@ -275,6 +279,44 @@ function decodePgBytea(value: string | null | undefined): string {
   return value;
 }
 
+// Normalize base64url encoding for consistent comparison
+function normalizeBase64(value: string): string {
+  // Handle null/undefined
+  if (!value) return '';
+  
+  // First, convert to standard base64 if it's in base64url format
+  // Replace '-' with '+', '_' with '/', and add padding if needed
+  let standardized = value
+    .replace(/-/g, '+')
+    .replace(/_/g, '/');
+  
+  // Add padding if needed
+  while (standardized.length % 4) {
+    standardized += '=';
+  }
+  
+  // Log the normalization for debugging
+  console.log('🔍 Normalizing base64:', {
+    original: value.substring(0, 10) + '...',
+    standardized: standardized.substring(0, 10) + '...',
+    originalLength: value.length,
+    standardizedLength: standardized.length
+  });
+  
+  return standardized;
+}
+
+// Convert to base64url format (RFC 4648)
+function toBase64Url(value: string): string {
+  if (!value) return '';
+  
+  // Convert standard base64 to base64url
+  return value
+    .replace(/\+/g, '-')
+    .replace(/\//g, '_')
+    .replace(/=+$/, '');
+}
+
 export async function POST(request: NextRequest) {
   try {
     const cookieStore = cookies();
@@ -358,37 +400,29 @@ export async function POST(request: NextRequest) {
         challenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...` : 'missing'
       });
       
-      // Improved challenge comparison with better logging
-      const decodedStoredChallenge = decodePgBytea(txChallenge);
+      // Get the stored challenge from cookie (already in base64url format)
+      const storedChallenge = txChallenge;
       
-      console.log('🔍 Challenge Processing:', {
-        rawClientChallenge: clientData.challenge ? `${clientData.challenge.substring(0, 10)}...${clientData.challenge.substring(clientData.challenge.length - 10)}` : 'missing',
-        storedChallenge: txChallenge ? `${txChallenge.substring(0, 10)}...${txChallenge.substring(txChallenge.length - 10)}` : 'missing',
-        decodedStoredChallenge: decodedStoredChallenge ? `${decodedStoredChallenge.substring(0, 10)}...${decodedStoredChallenge.substring(decodedStoredChallenge.length - 10)}` : 'missing',
-        clientChallengeLength: clientData.challenge?.length,
-        storedChallengeLength: txChallenge?.length,
-        decodedChallengeLength: decodedStoredChallenge?.length,
-        challengesMatch: clientData.challenge === decodedStoredChallenge,
-        firstDifference: clientData.challenge && decodedStoredChallenge ? 
-          findFirstDifferenceIndex(clientData.challenge, decodedStoredChallenge) : 'N/A'
+      // Convert both to byte arrays for comparison
+      const storedBytes = Buffer.from(storedChallenge, 'base64url');
+      const clientBytes = Buffer.from(clientData.challenge, 'base64');
+      
+      // Log for debugging
+      console.log('🔍 Challenge Bytes Comparison:', {
+        storedBytesLength: storedBytes.length,
+        clientBytesLength: clientBytes.length,
+        equal: storedBytes.equals(clientBytes),
+        storedHex: storedBytes.toString('hex').substring(0, 20) + '...',
+        clientHex: clientBytes.toString('hex').substring(0, 20) + '...'
       });
-
-      // Compare the client challenge with the decoded stored challenge
-      if (clientData.challenge !== decodedStoredChallenge) {
-        console.log('❌ Challenge mismatch:', {
-          stored: txChallenge?.substring(0, 20) + '...',
-          decoded: decodedStoredChallenge?.substring(0, 20) + '...',
-          received: clientData.challenge?.substring(0, 20) + '...',
-          storedLength: txChallenge?.length,
-          decodedLength: decodedStoredChallenge?.length,
-          receivedLength: clientData.challenge?.length,
-          // Try to identify where they differ
-          diffPosition: findFirstDifferenceIndex(clientData.challenge, decodedStoredChallenge)
-        });
+      
+      // Direct byte comparison
+      if (!storedBytes.equals(clientBytes)) {
+        console.error('❌ Challenge mismatch');
         throw new Error('Challenge mismatch');
       }
-
-      console.log('✅ Challenge verified successfully');
+      
+      console.log('✅ Challenge verified successfully through byte comparison');
 
       try {
         // Convert Maps to plain objects in the response
@@ -408,6 +442,19 @@ export async function POST(request: NextRequest) {
         console.log('/send/route.ts typeof credential_public_key:', typeof authenticator.credential_public_key);
         console.log('/send/route.ts is Buffer:', Buffer.isBuffer(authenticator.credential_public_key));
         
+        // normalise exactly the same way you'll pass to the verifier
+        const stored = storedChallenge;
+        const client = clientData.challenge;
+
+        // 👇 NEW – dump the raw bytes so we can _see_ the rogue char
+        const bufS = Buffer.from(stored , 'base64url');
+        const bufC = Buffer.from(client , 'base64');
+
+        console.log('🔬 bytes S:', bufS.toString('hex'));
+        console.log('🔬 bytes C:', bufC.toString('hex'));
+        console.log('lenS / lenC', bufS.length, bufC.length);
+
+        console.log('equal?', bufS.equals(bufC));
 
         function decodeBase64String(b64: string): Buffer {
           return Buffer.from(b64, 'base64');
@@ -435,7 +482,7 @@ export async function POST(request: NextRequest) {
         // Use the verification function with the prepared key
         const verification = await verifyAuthenticationResponse({
           response: safeResponse,
-          expectedChallenge: clientData.challenge,
+          expectedChallenge: Buffer.from(storedBytes).toString('base64url'),
           expectedOrigin: origin,
           expectedRPID: rpID,
           requireUserVerification: true,
@@ -563,4 +610,4 @@ function findFirstDifferenceIndex(str1: string, str2: string): string {
   }
   
   return 'Identical';
-} 
+}

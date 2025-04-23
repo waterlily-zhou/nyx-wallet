@@ -81,7 +81,7 @@ export async function POST(request: NextRequest) {
     // Generate authentication options
     const options: PublicKeyCredentialRequestOptionsJSON = await generateAuthenticationOptions({
       rpID,
-      challenge: challengeBase64url,
+      challenge: combinedChallenge,
       allowCredentials: [{
         id: authenticator.credential_id,
         transports: ['internal'] as AuthenticatorTransportFuture[]
