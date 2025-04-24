@@ -41,19 +41,21 @@ function mapToPlainObject(input: any): any {
   return result;
 }
 
-// Add this function to handle credential public key format
+// handle credential public key format
 function preparePublicKeyForVerification(key: string | Buffer): Buffer {
   try {
     if (Buffer.isBuffer(key)) return key;
-    
-    // Key is definitely a string at this point
     const keyString = key as string;
     
-    console.log('🔍 Preparing credential public key:', {
+    let jsonData = null;
+    let decodedString = keyString;
+    
+    console.log('🔍 Key type check:', {
+      isBuffer: Buffer.isBuffer(key),
       type: typeof keyString,
       startsWithBackslashX: keyString.startsWith('\\x'),
-      length: keyString.length,
-      preview: keyString.substring(0, 30) + '...'
+      startsWithEyI: keyString.startsWith('eyI'),
+      length: keyString.length
     });
     
     // Handle PostgreSQL bytea format (\x...)
@@ -62,182 +64,117 @@ function preparePublicKeyForVerification(key: string | Buffer): Buffer {
       const hexString = keyString.substring(2);
       
       // Convert hex to string
-      let decodedString = '';
+      decodedString = '';
       for (let i = 0; i < hexString.length; i += 2) {
         decodedString += String.fromCharCode(parseInt(hexString.substring(i, i + 2), 16));
       }
       
-      console.log('🔍 Decoded hex to string starting with:', decodedString.substring(0, 10));
+      console.log('🔍 After hex decode:', {
+        startsWith: decodedString.substring(0, 10),
+        length: decodedString.length,
+        isBase64: decodedString.startsWith('eyI')
+      });
+    }
+    
+    // Now process the string (which might be the original or hex-decoded)
+    // If it's base64-encoded JSON (eyI...)
+    if (decodedString.startsWith('eyI')) {
+      console.log('✅ Detected base64-encoded JSON');
       
-      // Check if it's base64-encoded JSON
-      if (decodedString.startsWith('eyI')) {
-        console.log('✅ Detected base64-encoded JSON');
+      // Decode the base64 to get the JSON string
+      const jsonString = Buffer.from(decodedString, 'base64').toString();
+      console.log('🔍 JSON string preview:', jsonString.substring(0, 50));
+      
+      // Parse the JSON
+      jsonData = JSON.parse(jsonString);
+      console.log('✅ Parsed JSON with keys:', Object.keys(jsonData).join(', '));
+    }
+    
+    // If we have JSON data, process it properly
+    if (jsonData) {
+      // Create a proper COSE_Key Map for CBOR encoding
+      const cbor = require('cbor');
+
+      // Check if the JSON seems to be array-like with numeric indices
+      if ('0' in jsonData && '1' in jsonData && !('-1' in jsonData) && !('-2' in jsonData)) {
+        console.log('🔍 Detected array-like credential format, reconstructing COSE key');
+        // For array-like data, extract key bytes directly
+        const dataView = new Uint8Array(Object.keys(jsonData).length);
         
-        try {
-          // Decode the base64 to get the JSON string
-          const jsonString = Buffer.from(decodedString, 'base64').toString();
-          console.log('🔍 JSON string preview:', jsonString.substring(0, 50));
-          
-          // Try to parse as JSON
-          const jsonObj = JSON.parse(jsonString);
-          console.log('✅ Parsed JSON with keys:', Object.keys(jsonObj));
-          
-          // DEBUG: Log the first few key-value pairs to understand structure
-          const firstFewEntries = Object.entries(jsonObj).slice(0, 10);
-          console.log('🔍 First few JSON entries:', 
-            firstFewEntries.map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : v}`).join(', ')
-          );
-          
-          // For WebAuthn credential public keys, we need to construct a proper COSE_Key
-          // Public key is typically stored in "-2" and "-3" for EC2 keys
-          
-          // Create a proper COSE_Key Map structure for CBOR encoding
-          // IMPORTANT: CBOR encoding requires a Map for proper COSE_Key structure
-          const coseKeyMap = new Map();
-          
-          // Check if the JSON might be a different representation (e.g., a decoded ArrayBuffer)
-          if (jsonObj['0'] === 165) { // 165 is 0xA5 in decimal, which often indicates the start of a COSE_Key
-            console.log('🔍 Detected array-like COSE_Key structure');
-            
-            // This appears to be an array representation of a CBOR-encoded COSE_Key
-            // Convert it to the actual key-value pair format expected by WebAuthn
-            
-            // Create a fresh ArrayBuffer
-            const dataView = new Uint8Array(Object.keys(jsonObj).length);
-            
-            // Fill the ArrayBuffer with values from the JSON
-            Object.entries(jsonObj).forEach(([index, value]) => {
-              dataView[parseInt(index)] = Number(value);
-            });
-            
-            // Log the first few bytes to verify
-            console.log('🔍 Recreated ArrayBuffer first 10 bytes:', 
-              Array.from(dataView.slice(0, 10)).map(v => v.toString(16).padStart(2, '0')).join(' ')
-            );
-            
-            // Return the buffer directly
-            return Buffer.from(dataView);
-          }
-          
-          // Otherwise, proceed with normal COSE_Key Map creation
-          for (const [key, value] of Object.entries(jsonObj)) {
-            // Convert string keys to numbers where possible
-            const numKey = !isNaN(Number(key)) ? Number(key) : key;
-            coseKeyMap.set(numKey, value);
-          }
-          
-          // Check the key type (kty)
-          const kty = coseKeyMap.get(1);
-          console.log('🔍 Original key type (kty):', kty);
-          
-          // Fix algorithm based on key type
-          if (kty === 1) { // OKP keys
-            // Algorithm 3 is not valid for OKP keys
-            if (coseKeyMap.get(3) === 3) {
-              console.log('⚠️ Fixing invalid algorithm for OKP key');
-              // Use EdDSA algorithm (-8) for OKP keys
-              coseKeyMap.set(3, -8);
-            }
-            
-            // Ensure curve parameter is set for OKP keys
-            if (!coseKeyMap.has(-1)) {
-              console.log('⚠️ Adding missing curve parameter for OKP key');
-              // Set to Ed25519 (6) which is common for WebAuthn
-              coseKeyMap.set(-1, 6);
-            }
-            
-            // Ensure we have both x (-2) and d parameters
-            if (!coseKeyMap.has(-2) && jsonObj['-2']) {
-              coseKeyMap.set(-2, jsonObj['-2']);
-            }
-            
-          } else if (kty === 2) { // EC2 keys
-            // Ensure we have ES256 algorithm (-7) for EC2 keys
-            if (!coseKeyMap.has(3) || coseKeyMap.get(3) !== -7) {
-              console.log('⚠️ Setting algorithm to ES256 for EC2 key');
-              coseKeyMap.set(3, -7);
-            }
-          } else if (!coseKeyMap.has(1)) {
-            // If key type is missing, set it based on what appears to be in the credential
-            if (coseKeyMap.has(-1) || coseKeyMap.has(-2)) {
-              // Has EC2 parameters
-              console.log('⚠️ Setting missing key type to EC2 (2)');
-              coseKeyMap.set(1, 2);
-              // Ensure algorithm is set for EC2
-              if (!coseKeyMap.has(3)) {
-                coseKeyMap.set(3, -7); // ES256
+        // Fill the ArrayBuffer with values from the JSON
+        Object.entries(jsonData).forEach(([index, value]) => {
+          dataView[parseInt(index)] = Number(value);
+        });
+        
+        console.log('✅ Reconstructed raw credential data of length:', dataView.length);
+        return Buffer.from(dataView);
+      }
+      
+      // Standard COSE key format handling
+      const coseKeyMap = new Map();
+      
+      // Convert JSON to Map with proper numeric keys
+      for (const [key, value] of Object.entries(jsonData)) {
+        // Convert string keys to numbers where possible
+        const numKey = !isNaN(Number(key)) ? Number(key) : key;
+        coseKeyMap.set(numKey, value);
+      }
+      
+      // FIX: Check key type and fix required parameters
+      const keyType = coseKeyMap.get(1); // 1 is kty (key type)
+      console.log('🔍 COSE key type (kty):', keyType);
+      
+      if (keyType === 1) { // OKP key type
+        console.log('✅ Detected OKP key type');
+        
+        // Fix: If alg is 3 for OKP, change it to -8 (EdDSA)
+        if (coseKeyMap.get(3) === 3) {
+          console.log('⚠️ Fixing invalid algorithm 3 for OKP key to -8 (EdDSA)');
+          coseKeyMap.set(3, -8);
+        }
+        
+        // CRITICAL FIX: Ensure curve parameter exists for OKP
+        if (!coseKeyMap.has(-1)) {
+          console.log('⚠️ Adding missing curve parameter for OKP key');
+          coseKeyMap.set(-1, 6); // 6 = Ed25519
+        }
+        
+        // CRITICAL FIX: Ensure x parameter exists for OKP
+        if (!coseKeyMap.has(-2)) {
+          // Try to find x parameter in JSON data
+          // In many implementations, it's stored in key 5 or after key 4
+          if (jsonData['5'] !== undefined && Array.isArray(jsonData['5'])) {
+            console.log('⚠️ Adding missing x parameter for OKP key from array data at key 5');
+            coseKeyMap.set(-2, Buffer.from(jsonData['5']));
+          } else {
+            // Search for a value that looks like a public key
+            for (const [key, value] of Object.entries(jsonData)) {
+              if (Array.isArray(value) && value.length >= 32) {
+                console.log(`⚠️ Adding missing x parameter for OKP key from array at key ${key}`);
+                coseKeyMap.set(-2, Buffer.from(value));
+                break;
               }
-            } else {
-              // Default to OKP if we can't determine
-              console.log('⚠️ Setting default key type to OKP (1) and algorithm to EdDSA (-8)');
-              coseKeyMap.set(1, 1);
-              coseKeyMap.set(3, -8);
             }
           }
-          
-          // Log the COSE key Map entries
-          console.log('🔍 COSE_Key Map keys:', Array.from(coseKeyMap.keys()));
-          console.log('🔍 Fixed key type (kty):', coseKeyMap.get(1));
-          console.log('🔍 Fixed algorithm (alg):', coseKeyMap.get(3));
-          
-          // Now use the CBOR library to properly encode the COSE key
-          const cbor = require('cbor');
-          const coseKeyBuffer = cbor.encode(coseKeyMap);
-          
-          console.log('✅ Successfully encoded as CBOR (first 10 bytes):', coseKeyBuffer.subarray(0, 10).toString('hex'));
-          return coseKeyBuffer;
-        } catch (jsonError) {
-          console.error('❌ Failed to process as JSON:', jsonError);
-          // Fall back to treating the base64 as raw credential data
-          return Buffer.from(decodedString, 'base64');
         }
-      }
-      
-      // If the decoded string looks like base64 but isn't JSON
-      if (/^[A-Za-z0-9+/=]+$/.test(decodedString)) {
-        console.log('✅ Treating as base64-encoded data');
-        try {
-          return Buffer.from(decodedString, 'base64');
-        } catch (e) {
-          console.error('❌ Failed to decode as base64:', e);
-        }
-      }
-      
-      // Direct hex conversion as a fallback
-      console.log('⚠️ Falling back to direct hex conversion');
-      return Buffer.from(hexString, 'hex');
-    }
-    
-    // Handle standard hex format without \x prefix
-    const isHexFormat = /^[0-9a-fA-F]+$/.test(keyString);
-    if (isHexFormat) {
-      console.log('✅ Converting hex format credential');
-      return Buffer.from(keyString, 'hex');
-    }
-    
-    // Check for direct JSON string
-    if (keyString.startsWith('{') && keyString.endsWith('}')) {
-      try {
-        console.log('🔍 Detected direct JSON string');
-        const jsonObj = JSON.parse(keyString);
-        console.log('✅ Parsed JSON with keys:', Object.keys(jsonObj));
         
-        // Try to convert to COSE format
-        const cbor = require('cbor');
-        const coseKeyBuffer = cbor.encode(jsonObj);
-        return coseKeyBuffer;
-      } catch (jsonError) {
-        console.error('❌ Failed to parse direct JSON:', jsonError);
+        console.log('🔍 Final parameters: kty:', coseKeyMap.get(1), 
+                    'alg:', coseKeyMap.get(3), 
+                    'crv:', coseKeyMap.get(-1), 
+                    'has x:', coseKeyMap.has(-2));
       }
+      
+      const encoded = cbor.encode(coseKeyMap);
+      console.log('✅ CBOR encoded, length:', encoded.length);
+      return encoded;
     }
     
-    // Handle base64 format as last resort
-    console.log('⚠️ Trying as base64 format credential');
+    // Last resort - try direct formats
+    console.log('⚠️ No JSON detected, trying direct decoding');
     return Buffer.from(keyString, 'base64');
   } catch (e) {
-    console.error('❌ Failed to prepare public key:', e);
-    console.error('Key format:', typeof key === 'string' ? key.substring(0, 100) : 'Buffer');
-    throw new Error('Invalid credential public key format');
+    console.error('❌ Error preparing public key:', e);
+    throw new Error(`Failed to prepare credential public key: ${(e as Error).message}`);
   }
 }
 
