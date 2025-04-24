@@ -72,6 +72,7 @@ export default function DashboardSidebar({
             </svg>
           </button>
         </div>
+        <button className='border border-violet-500 text-white rounded-md p-2 mt-2 mx-2 text-xs hover:bg-violet-500/20 transition'>Deploy</button>
       </div>
       
       {/* Navigation */}
