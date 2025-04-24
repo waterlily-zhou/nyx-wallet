@@ -139,26 +139,12 @@ export async function createSmartAccountFromCredential(
 // Updated to use the owner account directly instead of creating from private key
 async function createPermissionlessSCA(
   userId: string,
-  owner: any, // Using the already created owner from combined keys
+  owner: any,
   saltNonce?: bigint
 ) {
   try {
     console.log('Creating permissionless SCA with owner from DKG');
     console.log(`Owner EOA address: ${owner.address}`);
-    
-    // Get library version
-    const pkgVersion = getPermissionlessVersion();
-    console.log(`Permissionless version: ${pkgVersion}`);
-    
-    // List available account functions
-    const accountFunctions = getAvailableAccountFunctions();
-    console.log('Available account functions:');
-    for (const fn of accountFunctions) {
-      console.log(`- ${fn}`);
-    }
-    
-    // Use Safe Smart Account
-    console.log('Using accounts.toSafeSmartAccount');
     
     // Create public client with better fallback and retry
     const publicClient = createPublicClientForSepolia();
@@ -200,29 +186,6 @@ async function createPermissionlessSCA(
   } catch (error) {
     console.error('Error creating permissionless SCA:', error);
     throw error;
-  }
-}
-
-// Helper function to get permissionless version
-function getPermissionlessVersion() {
-  try {
-    const permissionless = require('permissionless/package.json');
-    return permissionless.version;
-  } catch (e) {
-    return 'unknown';
-  }
-}
-
-// Helper function to list available account functions
-function getAvailableAccountFunctions() {
-  try {
-    const permissionless = require('permissionless');
-    if (permissionless && permissionless.accounts) {
-      return Object.keys(permissionless.accounts);
-    }
-    return [];
-  } catch (e) {
-    return [];
   }
 }
 

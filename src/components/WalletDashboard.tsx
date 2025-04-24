@@ -11,7 +11,8 @@ import SettingsContent from './SettingsContent';
 import { TransactionProvider } from '@/contexts/TransactionContext';
 
 interface WalletInfo {
-  address: string;
+  address: Address;
+  userId: string;
   ethBalance: string;
   chain: {
     name: string;
@@ -68,7 +69,8 @@ export default function WalletDashboard() {
       // Extract data from the wallet check endpoint
       if (data.walletAddress) {
         setWalletInfo({
-          address: data.walletAddress,
+          address: data.walletAddress as Address,
+          userId: data.userId,
           ethBalance: "0", // We'll set this in the individual components
           chain: {
             name: "Base Sepolia",
@@ -76,7 +78,7 @@ export default function WalletDashboard() {
           }
         });
       } else {
-        throw new Error('No wallet found');
+        throw new Error('No wallet or user ID found');
       }
     } catch (err) {
       console.error('Error fetching wallet info:', err);
@@ -122,7 +124,8 @@ export default function WalletDashboard() {
       <div className="flex h-screen bg-black text-white">
         {/* Sidebar */}
         <DashboardSidebar 
-          walletAddress={walletInfo.address} 
+          walletAddress={walletInfo.address}
+          userId={walletInfo.userId}
           activeTab={activeTab}
           onTabChange={handleTabChange}
         />

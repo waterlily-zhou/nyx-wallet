@@ -1,109 +1,111 @@
 import { ClientSetup } from '../client-setup';
 import { createPublicClientForSepolia } from '../client-setup';
 import { privateKeyToAccount } from 'viem/accounts';
-import { type Address, type Hex } from 'viem';
+import { type Address } from 'viem';
 import { supabase } from '../supabase/server';
 import { decryptPrivateKey } from '../utils/key-encryption';
 import { createSafeAccountClient } from './safe-account';
 
 /**
- * Deploy a smart account to the blockchain
+ * Check if a smart account is deployed by checking its bytecode
+ * @param address The address to check
+ * @returns A promise resolving to a boolean indicating if the account is deployed
  */
-export async function deploySmartAccount(clientSetup: ClientSetup): Promise<string> {
-  const { smartAccount, smartAccountClient } = clientSetup;
-
-  const userOp = await smartAccountClient.sendTransaction({
-    account: smartAccount,
-    to: smartAccount.address,
-    data: '0x',
-    value: 0n,
-  });
-
-  await smartAccountClient.waitForUserOperationReceipt({ hash: userOp });
-  return smartAccount.address;
-}
-
-/**
- * Check if a smart account is deployed and deploy it if not
- * @param clientSetup The client setup with the smart account and client
- * @returns The smart account address
- */
-export async function ensureSmartAccountDeployed(clientSetup: ClientSetup): Promise<string> {
-  const { smartAccount } = clientSetup;
-  const publicClient = createPublicClientForSepolia();
-  
-  // Check if the account is already deployed
-  console.log(`Checking if smart account ${smartAccount.address} is deployed...`);
-  const code = await publicClient.getBytecode({
-    address: smartAccount.address,
-  });
-  
-  const isDeployed = !!code && code.length > 2; // "0x" means no code
-  
-  if (isDeployed) {
-    console.log(`Smart account ${smartAccount.address} is already deployed`);
-    return smartAccount.address;
-  }
-  
-  console.log(`Smart account ${smartAccount.address} is not deployed, deploying now...`);
-  return deploySmartAccount(clientSetup);
-}
-
-/**
- * Handle the deployment logic before a transaction
- * This function encapsulates the server-side deployment logic
- * 
- * @param userId The user ID
- * @param walletAddress The wallet address to deploy
- * @returns A promise resolving to a boolean indicating if deployment was successful
- */
-export async function handleDeploymentBeforeTransaction(
-  userId: string,
-  walletAddress: Address
-): Promise<boolean> {
-  console.log(`Handling deployment for wallet ${walletAddress} before transaction`);
-  
+export async function checkSmartAccountDeployed(address: Address): Promise<boolean> {
   try {
-    // Create a public client for checking deployment status
     const publicClient = createPublicClientForSepolia();
+    console.log(`Checking if smart account ${address} is deployed...`);
     
-    // Check if the account is already deployed
-    console.log(`Checking if smart account ${walletAddress} is deployed...`);
     const code = await publicClient.getBytecode({
-      address: walletAddress,
+      address,
     }).catch(err => {
-      console.error(`Error checking bytecode for ${walletAddress}:`, err);
+      console.error(`Error checking bytecode for ${address}:`, err);
       return null;
     });
     
     const isDeployed = !!code && code.length > 2; // "0x" means no code
     console.log(`Smart account deployed state: ${isDeployed ? 'deployed' : 'not deployed'}`);
     
+    return isDeployed;
+  } catch (error) {
+    console.error('Error checking smart account deployment:', error);
+    return false;
+  }
+}
+
+/**
+ * Deploy a smart account using the provided client setup
+ * @param clientSetup The client setup containing the account and client
+ * @returns A promise resolving to the deployed account address or null if deployment failed
+ */
+export async function deploySmartAccount(clientSetup: ClientSetup): Promise<Address | null> {
+  try {
+    const { smartAccount, smartAccountClient } = clientSetup;
+    console.log(`Deploying smart account ${smartAccount.address}...`);
+
+    // Send deployment transaction
+    const userOp = await smartAccountClient.sendTransaction({
+      account: smartAccount,
+      to: smartAccount.address,
+      data: '0x',
+      value: 0n,
+    });
+
+    // Wait for deployment to complete
+    await smartAccountClient.waitForUserOperationReceipt({ hash: userOp });
+    
+    // Verify deployment
+    const isDeployed = await checkSmartAccountDeployed(smartAccount.address);
+    if (!isDeployed) {
+      console.error('Deployment verification failed - no bytecode found after deployment');
+      return null;
+    }
+
+    console.log(`Smart account ${smartAccount.address} deployed successfully`);
+    return smartAccount.address;
+  } catch (error) {
+    console.error('Error deploying smart account:', error);
+    return null;
+  }
+}
+
+/**
+ * Handle the deployment process before a transaction
+ * This function checks if an account is deployed and deploys it if needed
+ * 
+ * @param userId The user ID
+ * @param walletAddress The wallet address to deploy
+ * @returns A promise resolving to a boolean indicating if the account is ready for transactions
+ */
+export async function handleDeploymentBeforeTransaction(
+  userId: string,
+  walletAddress: Address
+): Promise<boolean> {
+  console.log(`Handling deployment for wallet ${walletAddress}`);
+  
+  try {
+    // First check if already deployed
+    const isDeployed = await checkSmartAccountDeployed(walletAddress);
     if (isDeployed) {
-      console.log(`Smart account ${walletAddress} is already deployed, proceeding with transaction`);
+      console.log(`Smart account ${walletAddress} is already deployed`);
       return true;
     }
     
-    console.log('Smart account not deployed, attempting to deploy it...');
+    console.log('Smart account not deployed, initiating deployment process...');
     
-    // Get the server key from the database for deployment
+    // Get the server key from the database
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('server_key_encrypted')
       .eq('id', userId)
       .single();
       
-    if (userError) {
-      console.error('Failed to fetch user data for deployment:', userError.message, userError.code, userError.details);
+    if (userError || !userData?.server_key_encrypted) {
+      console.error('Failed to fetch server key:', userError?.message || 'Key not found');
       return false;
     }
     
-    if (!userData?.server_key_encrypted) {
-      console.error('Server key not found for user:', userId);
-      return false;
-    }
-    
-    // Get the server key (this is safer than using device key)
+    // Decrypt the server key
     let serverKey;
     try {
       serverKey = decryptPrivateKey(
@@ -112,62 +114,50 @@ export async function handleDeploymentBeforeTransaction(
       );
       
       if (!serverKey) {
-        console.error('Failed to decrypt server key for user:', userId);
+        console.error('Failed to decrypt server key');
         return false;
       }
-    } catch (decryptError) {
-      console.error('Error decrypting server key:', decryptError);
+    } catch (error) {
+      console.error('Error decrypting server key:', error);
       return false;
     }
     
-    // Create an account for deployment only (using server key)
+    // Create deployment account and client setup
     const deploymentAccount = privateKeyToAccount(serverKey as `0x${string}`);
     console.log('Created deployment account:', deploymentAccount.address);
     
-    // Create the account client
-    let clientSetup;
-    try {
-      clientSetup = await createSafeAccountClient(deploymentAccount);
-      
-      // Create the proper ClientSetup object
-      const fullClientSetup = {
-        owner: deploymentAccount,
-        smartAccount: clientSetup.smartAccount,
-        smartAccountClient: clientSetup.smartAccountClient,
-        publicClient: clientSetup.publicClient,
-        pimlicoClient: clientSetup.pimlicoClient
-      };
-      
-      console.log('Deploying smart account...');
-      // Deploy the account using the existing function
-      await deploySmartAccount(fullClientSetup);
-    } catch (setupError) {
-      console.error('Error setting up or deploying smart account:', setupError);
+    // Setup the client
+    const clientSetup = await createSafeAccountClient(deploymentAccount);
+    const fullClientSetup = {
+      owner: deploymentAccount,
+      smartAccount: clientSetup.smartAccount,
+      smartAccountClient: clientSetup.smartAccountClient,
+      publicClient: clientSetup.publicClient,
+      pimlicoClient: clientSetup.pimlicoClient
+    };
+    
+    // Deploy the account
+    const deployedAddress = await deploySmartAccount(fullClientSetup);
+    if (!deployedAddress) {
+      console.error('Failed to deploy smart account');
       return false;
     }
     
-    console.log('Smart account deployed successfully, waiting a moment for propagation...');
+    // Add a small delay to ensure network propagation
+    console.log('Waiting for deployment propagation...');
     await new Promise(resolve => setTimeout(resolve, 2000));
     
-    // Verify the deployment worked
-    try {
-      const verifyCode = await publicClient.getBytecode({
-        address: walletAddress,
-      });
-      
-      if (!verifyCode || verifyCode.length <= 2) {
-        console.error('Smart account deployment verification failed, bytecode not found');
-        return false;
-      }
-      
-      console.log('Smart account deployment confirmed, proceeding with transaction');
-      return true;
-    } catch (verifyError) {
-      console.error('Error verifying smart account deployment:', verifyError);
+    // Final verification
+    const finalCheck = await checkSmartAccountDeployed(walletAddress);
+    if (!finalCheck) {
+      console.error('Final deployment verification failed');
       return false;
     }
+    
+    console.log('Smart account deployment confirmed and ready for transactions');
+    return true;
   } catch (error) {
-    console.error('Unexpected error deploying smart account:', error);
+    console.error('Unexpected error in deployment process:', error);
     return false;
   }
 }

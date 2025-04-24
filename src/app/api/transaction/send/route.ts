@@ -530,7 +530,7 @@ export async function POST(request: NextRequest) {
       { status: 500 }
     );
   }
-}
+} 
 
 // Helper to find the first position where two strings differ
 function findFirstDifferenceIndex(str1: string, str2: string): string {
@@ -547,4 +547,4 @@ function findFirstDifferenceIndex(str1: string, str2: string): string {
   }
   
   return 'Identical';
-}
+} 

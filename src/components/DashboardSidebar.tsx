@@ -2,15 +2,19 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
+import { checkSmartAccountDeployed, handleDeploymentBeforeTransaction } from '@/lib/wallet/deploy';
+import { type Address } from 'viem';
 
 interface DashboardSidebarProps {
-  walletAddress: string;
+  walletAddress: Address;
+  userId: string;
   activeTab: string;
   onTabChange: (tab: string) => void;
 }
 
 export default function DashboardSidebar({ 
   walletAddress, 
+  userId,
   activeTab,
   onTabChange 
 }: DashboardSidebarProps) {
@@ -23,6 +27,21 @@ export default function DashboardSidebar({
     e.preventDefault();
     onTabChange(tab);
   };
+
+  const [isDeployed, setIsDeployed] = useState<boolean>(true); // Default to true to avoid flash
+  const [isDeploying, setIsDeploying] = useState<boolean>(false);
+
+  // Add useEffect to check deployment status
+  useEffect(() => {
+    if (!walletAddress) return;
+    
+    const checkDeployment = async () => {
+      const deployed = await checkSmartAccountDeployed(walletAddress);
+      setIsDeployed(deployed);
+    };
+    
+    checkDeployment();
+  }, [walletAddress]);
 
   return (
     <div className="w-64 border-r border-gray-800 flex flex-col">
@@ -72,7 +91,35 @@ export default function DashboardSidebar({
             </svg>
           </button>
         </div>
-        <button className='border border-violet-500 text-white rounded-md p-2 mt-2 mx-2 text-xs hover:bg-violet-500/20 transition'>Deploy</button>
+        {!isDeployed && <button 
+          className={`border border-violet-500 text-white rounded-md p-2 mt-2 mx-2 text-xs transition ${
+            isDeploying ? 'opacity-50 cursor-not-allowed' : 'hover:bg-violet-500/20'
+          }`}
+          onClick={async () => {
+            if (isDeploying || !userId || !walletAddress) return;
+            
+            try {
+              setIsDeploying(true);
+              const success = await handleDeploymentBeforeTransaction(userId, walletAddress);
+              
+              if (success) {
+                setIsDeployed(true);
+                // Optional: Show success toast/notification
+              } else {
+                // Optional: Show error toast/notification
+                console.error('Failed to deploy smart account');
+              }
+            } catch (error) {
+              console.error('Error deploying smart account:', error);
+              // Optional: Show error toast/notification
+            } finally {
+              setIsDeploying(false);
+            }
+          }}
+          disabled={isDeploying}
+        >
+          {isDeploying ? 'Deploying...' : 'Deploy'}
+        </button>}
       </div>
       
       {/* Navigation */}
