@@ -1,10 +1,12 @@
 import { ClientSetup } from '../client-setup';
-import { createPublicClientForSepolia, createSafeSmartAccount, createChainPublicClient, createPimlicoClientInstance, createSmartAccountClientWithPaymaster, getActiveChain } from '../client-setup';
+import { createPublicClientForSepolia, createSafeSmartAccount, createChainPublicClient, createPimlicoClientInstance, getActiveChain } from '../client-setup';
 import { privateKeyToAccount } from 'viem/accounts';
 import { type Address } from 'viem';
 import { supabase } from '../supabase/server';
 import { decryptPrivateKey } from '../utils/key-encryption';
 import { createSafeAccountClient } from './safe-account';
+import { createSmartAccountClient } from 'permissionless';
+import { http } from 'viem';
 
 /**
  * Check if a smart account is deployed by checking its bytecode
@@ -141,34 +143,45 @@ export async function handleDeploymentBeforeTransaction(
     
     // Setup the client
     const publicClient = createChainPublicClient();
-    const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+    const activeChain = getActiveChain();
     
-    // Create smart account with the device key as the owner
+    // Create smart account with the server key as the owner
     const smartAccount = await createSafeSmartAccount(publicClient, deployAccount);
     
-    // We'll use the actual wallet address instead of calculating a new one based on the deployment account
-    // This ensures we use the address that has the funds
+    // Check if the smart account address matches the wallet address we're trying to deploy
+    console.log(`Smart account address: ${smartAccount.address}`);
+    console.log(`Target wallet address: ${walletAddress}`);
     
-    const activeChain = getActiveChain();
-    const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+    if (smartAccount.address.toLowerCase() !== walletAddress.toLowerCase()) {
+      console.error(`ERROR: Address mismatch. The smart account would deploy to ${smartAccount.address} but we need ${walletAddress}`);
+      console.error(`Cannot proceed with deployment`);
+      return false;
+    }
     
-    // Create the smart account client (no paymaster, will use the funds in the address)
-    const smartAccountClient = createSmartAccountClientWithPaymaster(
-      smartAccount,
-      pimlicoClient,
-      pimlicoUrl
-    );
+    // Create a vanilla smart account client with no paymaster
+    // This will use the ETH in the smart account address to pay for deployment
+    console.log(`Creating vanilla smart account client (no paymaster)...`);
+    const bundlerUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+    
+    const smartAccountClient = createSmartAccountClient({
+      account: smartAccount,
+      chain: activeChain.chain,
+      bundlerTransport: http(bundlerUrl),
+      // No middleware/paymaster - we'll use the funds in the smart account
+    });
+    
+    console.log(`Smart account client created successfully`);
     
     const fullClientSetup = {
       owner: deployAccount,
       smartAccount,
       smartAccountClient,
       publicClient,
-      pimlicoClient
+      pimlicoClient: null // Not using a pimlico client for this deployment
     };
     
     // Deploy the account using the funds in the smart account address
-    console.log(`Deploying smart account ${walletAddress}...`);
+    console.log(`Deploying smart account ${walletAddress} using its own funds...`);
     const deployResult = await deploySmartAccount(fullClientSetup, walletAddress);
     
     if (!deployResult) {
