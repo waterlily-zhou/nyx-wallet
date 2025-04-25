@@ -7,6 +7,8 @@ const nextConfig = {
   env: {
     // Define any environment variables needed
     NEXT_PUBLIC_APP_URL: process.env.NEXT_PUBLIC_APP_URL || 'http://localhost',
+    NEXT_PUBLIC_SUPABASE_URL: process.env.NEXT_PUBLIC_SUPABASE_URL,
+    NEXT_PUBLIC_SUPABASE_ANON_KEY: process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY,
     CLAUDE_API_KEY: process.env.CLAUDE_API_KEY,
     ETHERSCAN_API_KEY: process.env.ETHERSCAN_API_KEY,
     TENDERLY_ACCESS_KEY: process.env.TENDERLY_ACCESS_KEY,
@@ -31,6 +33,19 @@ const nextConfig = {
       tls: false,
       stream: false,
     };
+    
+    // Prevent WASM files from being minimized
+    if (config.optimization && config.optimization.minimizer) {
+      config.optimization.minimizer = config.optimization.minimizer.map(
+        (minimizer) => {
+          if (minimizer.constructor.name === 'TerserPlugin') {
+            minimizer.options.exclude = /\.wasm(\?.*)?$/i;
+          }
+          return minimizer;
+        }
+      );
+    }
+    
     return config;
   },
 };

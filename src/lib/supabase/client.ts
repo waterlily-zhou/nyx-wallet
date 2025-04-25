@@ -40,12 +40,16 @@ export type SupabaseResponse<T> = {
 const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
 const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
 
-if (!supabaseUrl || !supabaseKey) {
-  throw new Error('Missing Supabase environment variables');
+// Log environment variable presence for debugging (only in dev)
+if (process.env.NODE_ENV === 'development') {
+  console.log('Supabase client environment check:', {
+    'NEXT_PUBLIC_SUPABASE_URL': !!supabaseUrl ? 'present' : 'missing',
+    'NEXT_PUBLIC_SUPABASE_ANON_KEY': !!supabaseKey ? 'present' : 'missing',
+  });
 }
 
 // Create and export the Supabase client
-export const supabase = createClient(supabaseUrl, supabaseKey, {
+export const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
   auth: {
     persistSession: false
   }

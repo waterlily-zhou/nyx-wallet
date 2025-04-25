@@ -2,8 +2,9 @@
 
 import { useState, useEffect } from 'react';
 import Link from 'next/link';
-import { checkSmartAccountDeployed, handleDeploymentBeforeTransaction } from '@/lib/wallet/deploy';
 import { type Address } from 'viem';
+import DeployModal from './DeployModal';
+import { checkDeploymentStatus } from '@/lib/actions/deploy-actions';
 
 interface DashboardSidebarProps {
   walletAddress: Address;
@@ -30,13 +31,15 @@ export default function DashboardSidebar({
 
   const [isDeployed, setIsDeployed] = useState<boolean>(true); // Default to true to avoid flash
   const [isDeploying, setIsDeploying] = useState<boolean>(false);
+  const [isDeployModalOpen, setIsDeployModalOpen] = useState<boolean>(false);
 
   // Add useEffect to check deployment status
   useEffect(() => {
     if (!walletAddress) return;
     
     const checkDeployment = async () => {
-      const deployed = await checkSmartAccountDeployed(walletAddress);
+      // Use the server action instead of direct function call
+      const deployed = await checkDeploymentStatus(walletAddress);
       setIsDeployed(deployed);
     };
     
@@ -92,34 +95,25 @@ export default function DashboardSidebar({
           </button>
         </div>
         {!isDeployed && <button 
-          className={`border border-violet-500 text-white rounded-md p-2 mt-2 mx-2 text-xs transition ${
-            isDeploying ? 'opacity-50 cursor-not-allowed' : 'hover:bg-violet-500/20'
-          }`}
-          onClick={async () => {
-            if (isDeploying || !userId || !walletAddress) return;
-            
-            try {
-              setIsDeploying(true);
-              const success = await handleDeploymentBeforeTransaction(userId, walletAddress);
-              
-              if (success) {
-                setIsDeployed(true);
-                // Optional: Show success toast/notification
-              } else {
-                // Optional: Show error toast/notification
-                console.error('Failed to deploy smart account');
-              }
-            } catch (error) {
-              console.error('Error deploying smart account:', error);
-              // Optional: Show error toast/notification
-            } finally {
-              setIsDeploying(false);
+          className="border border-violet-500 text-white rounded-md p-2 mt-2 mx-2 text-xs hover:bg-violet-500/20 transition"
+          onClick={() => setIsDeployModalOpen(true)}
+        >
+          Deploy
+        </button>}
+        
+        {/* Deploy Modal */}
+        <DeployModal 
+          isOpen={isDeployModalOpen}
+          onClose={() => {
+            setIsDeployModalOpen(false);
+            // Re-check deployment status when modal is closed
+            if (walletAddress) {
+              checkDeploymentStatus(walletAddress).then(setIsDeployed);
             }
           }}
-          disabled={isDeploying}
-        >
-          {isDeploying ? 'Deploying...' : 'Deploy'}
-        </button>}
+          walletAddress={walletAddress}
+          userId={userId}
+        />
       </div>
       
       {/* Navigation */}

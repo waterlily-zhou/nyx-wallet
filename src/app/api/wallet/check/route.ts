@@ -6,15 +6,18 @@ export async function GET() {
     console.log('Wallet check endpoint called');
     const cookieStore = cookies();
     const walletAddress = cookieStore.get('walletAddress')?.value;
+    const userId = cookieStore.get('userId')?.value;
     const session = cookieStore.get('session')?.value;
 
     console.log('Checking wallet cookies:', { 
-      walletAddress: walletAddress || 'not found', 
+      walletAddress: walletAddress || 'not found',
+      userId: userId || 'not found',
       session: session || 'not found' 
     });
 
     return NextResponse.json({
       walletAddress,
+      userId,
       hasWallet: !!walletAddress,
       isAuthenticated: session === 'authenticated'
     });

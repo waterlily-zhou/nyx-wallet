@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase/server';
 
 export async function GET(request: NextRequest) {
   try {
+    console.log('supabase client is:', supabase.auth);
     console.log('API: Challenge endpoint called');
     console.log('API: Request URL:', request.url);
     console.log('API: Request headers:', Object.fromEntries(request.headers.entries()));

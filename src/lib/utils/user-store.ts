@@ -288,79 +288,132 @@ export async function findAuthenticatorByCredentialId(credentialId: string): Pro
     // Log the incoming credential ID format
     console.log('🔍 Finding authenticator for credential ID:', credentialId);
     
-    // Convert the credential ID to base64url format
-    let credentialIdBase64url: string;
+    // Try different formats of the credential ID
+    const formats = [];
+    
+    // Original format
+    formats.push(credentialId);
+    
+    // Format 1: Base64 to base64url (no padding)
     try {
-      // First try to decode as base64
       const decoded = Buffer.from(credentialId, 'base64');
-      credentialIdBase64url = decoded.toString('base64url');
-      console.log('🔄 Converted credential ID from base64 to base64url format');
-    } catch {
-      try {
-        // If that fails, try base64url
-        const decoded = Buffer.from(credentialId, 'base64url');
-        credentialIdBase64url = decoded.toString('base64url');
-        console.log('🔄 Credential ID was already in base64url format');
-      } catch {
-        // If both fail, assume it's raw bytes
-        credentialIdBase64url = Buffer.from(credentialId).toString('base64url');
-        console.log('🔄 Converted credential ID from raw bytes to base64url format');
+      formats.push(decoded.toString('base64url'));
+    } catch (e) {
+      console.log('Could not convert from base64 to base64url:', e);
+    }
+    
+    // Format 2: With padding removed
+    if (credentialId.endsWith('=')) {
+      formats.push(credentialId.replace(/=+$/, ''));
+    }
+    
+    // Format 3: With padding added
+    if (!credentialId.endsWith('=')) {
+      // Add padding
+      let padded = credentialId;
+      while (padded.length % 4 !== 0) {
+        padded += '=';
+      }
+      formats.push(padded);
+    }
+    
+    console.log('🔍 Will try these credential ID formats:', formats);
+    
+    // Try to find the authenticator with any of these credential ID formats
+    let authenticatorData = null;
+    let formatUsed = null;
+    
+    for (const format of formats) {
+      // Query with the current format
+      console.log(`🔍 Trying credential_id="${format}"`);
+      
+      const { data, error } = await supabase
+        .from('authenticators')
+        .select('*')
+        .eq('credential_id', format);
+        
+      if (error) {
+        console.error(`❌ Error with format "${format}":`, error.message);
+        continue;
+      }
+      
+      if (data && data.length > 0) {
+        console.log(`✅ Found authenticator with format "${format}"!`);
+        authenticatorData = data[0];
+        formatUsed = format;
+        break;
+      } else {
+        console.log(`❌ No authenticator found with format "${format}"`);
       }
     }
     
-    // Log the conversion result
-    console.log('🔍 Credential ID conversion:', {
-      original: credentialId,
-      base64url: credentialIdBase64url,
-      length: credentialIdBase64url.length
-    });
-    
-    // Find the authenticator in Supabase
-    console.log('🔍 Querying Supabase with credential_id:', credentialIdBase64url);
-    const { data, error } = await supabase
-      .from('authenticators')
-      .select('*')
-      .eq('credential_id', credentialIdBase64url)
-      .single();
-    
-    if (error || !data) {
-      console.error('❌ Error finding authenticator by credential ID:', error?.message || 'Authenticator not found');
-      console.log('📝 Debug info:', {
-        originalCredentialId: credentialId,
-        convertedCredentialId: credentialIdBase64url,
-        error: error?.message
-      });
+    if (!authenticatorData) {
+      console.error('❌ No authenticator found for any credential ID format');
+      
+      // DEBUG: List all authenticators for troubleshooting
+      const { data: allAuths, error: listError } = await supabase
+        .from('authenticators')
+        .select('credential_id')
+        .limit(10);
+        
+      if (!listError && allAuths) {
+        console.log('📋 Available authenticator credential_ids in database:', 
+          allAuths.map(a => a.credential_id));
+      }
+      
       return undefined;
     }
-    
-    console.log('✅ Found authenticator:', data.id);
     
     // Get the user's default wallet address
     const { data: walletData, error: walletError } = await supabase
       .from('wallets')
       .select('address')
-      .eq('user_id', data.user_id)
-      .eq('is_default', true)
-      .single();
+      .eq('user_id', authenticatorData.user_id)
+      .eq('is_default', true);
     
     // If no wallet found, return undefined
-    if (walletError || !walletData) {
-      console.log('❌ No wallet found for this authenticator, returning undefined');
-      return undefined;
+    if (walletError || !walletData || walletData.length === 0) {
+      console.log('❌ No default wallet found for this authenticator, checking for any wallet');
+      
+      // Try to find any wallet for this user
+      const { data: anyWallet, error: anyWalletError } = await supabase
+        .from('wallets')
+        .select('address')
+        .eq('user_id', authenticatorData.user_id)
+        .limit(1);
+        
+      if (anyWalletError || !anyWallet || anyWallet.length === 0) {
+        console.log('❌ No wallets found for this user at all');
+        return undefined;
+      }
+      
+      console.log('✅ Found non-default wallet address:', anyWallet[0].address);
+      
+      // Convert from Supabase to AuthenticatorDevice
+      return {
+        id: authenticatorData.id,
+        walletAddress: anyWallet[0].address as Address,
+        credentialID: authenticatorData.credential_id,
+        credentialPublicKey: authenticatorData.credential_public_key,
+        counter: authenticatorData.counter,
+        deviceName: authenticatorData.device_name || 'Unknown Device',
+        createdAt: new Date(authenticatorData.created_at),
+        lastUsed: authenticatorData.last_used ? new Date(authenticatorData.last_used) : undefined
+      };
     }
     
-    console.log('✅ Found wallet address:', walletData.address);
+    console.log('✅ Found default wallet address:', walletData[0].address);
     
     // Convert from Supabase to AuthenticatorDevice
     return {
-      id: data.id,
-      walletAddress: walletData.address as Address,
-      credentialID: data.credential_id,
-      credentialPublicKey: data.credential_public_key,
-      counter: data.counter,
-      deviceName: data.device_name || 'Unknown Device',
-      createdAt: new Date(data.created_at),
-      lastUsed: data.last_used ? new Date(data.last_used) : undefined
+      id: authenticatorData.id,
+      walletAddress: walletData[0].address as Address,
+      credentialID: authenticatorData.credential_id,
+      credentialPublicKey: authenticatorData.credential_public_key,
+      counter: authenticatorData.counter,
+      deviceName: authenticatorData.device_name || 'Unknown Device',
+      createdAt: new Date(authenticatorData.created_at),
+      lastUsed: authenticatorData.last_used ? new Date(authenticatorData.last_used) : undefined
     };
   } catch (error) {
     console.error('❌ Error finding authenticator by credential ID:', error);
@@ -883,52 +936,78 @@ export async function findUserByCredentialId(credentialId: string) {
     // Log the incoming credential ID format
     console.log('🔍 Finding user for credential ID:', credentialId);
     
-    // Convert the credential ID to base64url format
-    let credentialIdBase64url: string;
+    // Try different formats of the credential ID
+    const formats = [];
+    
+    // Original format
+    formats.push(credentialId);
+    
+    // Format 1: Base64 to base64url (no padding)
     try {
-      // First try to decode as base64
       const decoded = Buffer.from(credentialId, 'base64');
-      credentialIdBase64url = decoded.toString('base64url');
-      console.log('🔄 Converted credential ID from base64 to base64url format');
-    } catch {
-      try {
-        // If that fails, try base64url
-        const decoded = Buffer.from(credentialId, 'base64url');
-        credentialIdBase64url = decoded.toString('base64url');
-        console.log('🔄 Credential ID was already in base64url format');
-      } catch {
-        // If both fail, assume it's raw bytes
-        credentialIdBase64url = Buffer.from(credentialId).toString('base64url');
-        console.log('🔄 Converted credential ID from raw bytes to base64url format');
+      formats.push(decoded.toString('base64url'));
+    } catch (e) {
+      console.log('Could not convert from base64 to base64url:', e);
+    }
+    
+    // Format 2: With padding removed
+    if (credentialId.endsWith('=')) {
+      formats.push(credentialId.replace(/=+$/, ''));
+    }
+    
+    // Format 3: With padding added
+    if (!credentialId.endsWith('=')) {
+      // Add padding
+      let padded = credentialId;
+      while (padded.length % 4 !== 0) {
+        padded += '=';
+      }
+      formats.push(padded);
+    }
+    
+    console.log('🔍 Will try these credential ID formats:', formats);
+    
+    // Try to find the authenticator with any of these credential ID formats
+    let authenticator = null;
+    let formatUsed = null;
+    
+    for (const format of formats) {
+      // Query with the current format
+      console.log(`🔍 Trying credential_id="${format}"`);
+      
+      const { data, error } = await supabase
+        .from('authenticators')
+        .select('user_id')
+        .eq('credential_id', format);
+        
+      if (error) {
+        console.error(`❌ Error with format "${format}":`, error.message);
+        continue;
+      }
+      
+      if (data && data.length > 0) {
+        console.log(`✅ Found authenticator with format "${format}"!`);
+        authenticator = data[0];
+        formatUsed = format;
+        break;
+      } else {
+        console.log(`❌ No authenticator found with format "${format}"`);
       }
     }
-    
-    // Log the conversion result
-    console.log('🔍 Credential ID conversion:', {
-      original: credentialId,
-      base64url: credentialIdBase64url,
-      length: credentialIdBase64url.length
-    });
-    
-    // First find the authenticator with this credential ID
-    const { data: authenticator, error: authError } = await supabase
-      .from('authenticators')
-      .select('user_id')
-      .eq('credential_id', credentialIdBase64url)
-      .single();
 
-    if (authError) {
-      console.error('❌ Error finding authenticator:', authError);
-      console.log('📝 Debug info:', {
-        originalCredentialId: credentialId,
-        convertedCredentialId: credentialIdBase64url,
-        error: authError.message
-      });
-      return null;
-    }
-
+    // If we didn't find any matching authenticator
     if (!authenticator) {
-      console.log('❌ No authenticator found for credential ID:', credentialIdBase64url);
+      console.error('❌ No authenticator found for any credential ID format');
+      
+      // DEBUG: List all authenticators for troubleshooting
+      const { data: allAuths, error: listError } = await supabase
+        .from('authenticators')
+        .select('credential_id, user_id');
+        
+      if (!listError && allAuths) {
+        console.log('📋 Available authenticators in database:', allAuths);
+      }
+      
       return null;
     }
 
@@ -945,6 +1024,19 @@ export async function findUserByCredentialId(credentialId: string) {
     }
 
     console.log('✅ Found user:', user.id);
+    
+    // Find the user's wallets
+    const { data: wallets, error: walletsError } = await supabase
+      .from('wallets')
+      .select('*')
+      .eq('user_id', user.id);
+      
+    if (walletsError) {
+      console.error('❌ Error finding wallets:', walletsError);
+    } else {
+      console.log(`✅ Found ${wallets.length} wallets for user ${user.id}`);
+    }
+    
     return user;
   } catch (error) {
     console.error('❌ Error in findUserByCredentialId:', error);

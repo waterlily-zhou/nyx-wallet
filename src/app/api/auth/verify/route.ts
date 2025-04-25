@@ -1,8 +1,11 @@
+export const runtime = 'nodejs';
+
 import { NextRequest, NextResponse } from 'next/server';
 import { cookies } from 'next/headers';
 import { findUserByCredentialId, findUserByWalletAddress } from '@/lib/utils/user-store';
 import { type Address } from 'viem';
 import crypto from 'crypto';
+import { supabase } from '@/lib/supabase/server';
 
 // WebAuthn settings
 const rpID = process.env.RP_ID || 'localhost';
@@ -12,9 +15,54 @@ const expectedOrigin = process.env.ORIGIN ||
     ? `https://${rpID}` 
     : `http://${rpID}`);
 
+    
+
 export async function POST(request: NextRequest) {
   try {
+    console.log('User session:', await supabase.auth.getSession());
     console.log('API: Verify endpoint called');
+
+    //! TESTING
+    const rawId = 'PEfr3iEhUN351Z8xhS6TMA7lz9U=';
+
+    console.log('Running raw query...');
+    let res = await supabase.from('authenticators').select('*').eq('credential_id', rawId);
+    console.log('Raw result:', res.data);
+
+    console.log('Running buffer query...');
+    let buf = Buffer.from(rawId, 'base64');
+    res = await supabase.from('authenticators').select('*').eq('credential_id', buf);
+    console.log('Buffer result:', res.data);
+    //! END TESTING
+    // First check if we have the service role key available
+    const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
+    if (!serviceRoleKey) {
+      console.error('CRITICAL ERROR: Missing SUPABASE_SERVICE_ROLE_KEY in verify endpoint');
+    } else {
+      console.log('Service role key is available in verify endpoint', {
+        length: serviceRoleKey.length,
+        prefix: serviceRoleKey.substring(0, 5) + '...',
+        isValidFormat: serviceRoleKey.startsWith('eyJ') ? 'yes' : 'no'
+      });
+    }
+    
+    // Quick direct DB test
+    try {
+      console.log('Running direct Supabase test in verify endpoint...');
+      const { data: testData, error: testError } = await supabase
+        .from('authenticators')
+        .select('id')
+        .limit(1);
+        
+      if (testError) {
+        console.error('Direct Supabase test failed:', testError.message);
+      } else {
+        console.log(`Direct Supabase test successful, found ${testData?.length || 0} authenticators`);
+      }
+    } catch (testErr) {
+      console.error('Direct Supabase test error:', testErr);
+    }
+    
     const cookieStore = cookies();
     const storedChallenge = cookieStore.get('auth_challenge')?.value;
     const walletAddress = cookieStore.get('walletAddress')?.value;

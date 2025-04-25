@@ -97,19 +97,23 @@ export async function handleDeploymentBeforeTransaction(
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('server_key_encrypted')
-      .eq('id', userId)
-      .single();
+      .eq('id', userId);
       
-    if (userError || !userData?.server_key_encrypted) {
-      console.error('Failed to fetch server key:', userError?.message || 'Key not found');
+    if (userError) {
+      console.error('Failed to fetch user data for deployment:', userError.message, userError.code, userError.details);
+      return false;
+    }
+
+    if (!userData || userData.length === 0 || !userData[0]?.server_key_encrypted) {
+      console.error('Server key not found for user:', userId);
       return false;
     }
     
-    // Decrypt the server key
+    // Get the server key (this is safer than using device key)
     let serverKey;
     try {
       serverKey = decryptPrivateKey(
-        userData.server_key_encrypted,
+        userData[0].server_key_encrypted,
         process.env.KEY_ENCRYPTION_KEY || ''
       );
       
