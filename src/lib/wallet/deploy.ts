@@ -1,5 +1,5 @@
 import { ClientSetup } from '../client-setup';
-import { createPublicClientForSepolia } from '../client-setup';
+import { createPublicClientForSepolia, createSafeSmartAccount, createChainPublicClient, createPimlicoClientInstance, createSmartAccountClientWithPaymaster, getActiveChain } from '../client-setup';
 import { privateKeyToAccount } from 'viem/accounts';
 import { type Address } from 'viem';
 import { supabase } from '../supabase/server';
@@ -36,12 +36,23 @@ export async function checkSmartAccountDeployed(address: Address): Promise<boole
 /**
  * Deploy a smart account using the provided client setup
  * @param clientSetup The client setup containing the account and client
- * @returns A promise resolving to the deployed account address or null if deployment failed
+ * @param targetWalletAddress The specific wallet address we want to deploy
+ * @returns A promise resolving to a boolean indicating if deployment succeeded
  */
-export async function deploySmartAccount(clientSetup: ClientSetup): Promise<Address | null> {
+export async function deploySmartAccount(
+  clientSetup: ClientSetup,
+  targetWalletAddress: Address
+): Promise<boolean> {
   try {
     const { smartAccount, smartAccountClient } = clientSetup;
-    console.log(`Deploying smart account ${smartAccount.address}...`);
+    console.log(`Attempting deployment for smart account ${targetWalletAddress}...`);
+    
+    // Critical check: make sure we're deploying the right address
+    if (smartAccount.address.toLowerCase() !== targetWalletAddress.toLowerCase()) {
+      console.error(`Address mismatch: Expected to deploy ${targetWalletAddress} but got ${smartAccount.address}`);
+      console.error(`Cannot proceed with deployment - addresses don't match`);
+      return false;
+    }
 
     // Send deployment transaction
     const userOp = await smartAccountClient.sendTransaction({
@@ -51,21 +62,23 @@ export async function deploySmartAccount(clientSetup: ClientSetup): Promise<Addr
       value: 0n,
     });
 
+    console.log(`Deployment transaction sent with hash: ${userOp}`);
+
     // Wait for deployment to complete
     await smartAccountClient.waitForUserOperationReceipt({ hash: userOp });
     
     // Verify deployment
-    const isDeployed = await checkSmartAccountDeployed(smartAccount.address);
+    const isDeployed = await checkSmartAccountDeployed(targetWalletAddress);
     if (!isDeployed) {
       console.error('Deployment verification failed - no bytecode found after deployment');
-      return null;
+      return false;
     }
 
-    console.log(`Smart account ${smartAccount.address} deployed successfully`);
-    return smartAccount.address;
+    console.log(`Smart account ${targetWalletAddress} deployed successfully`);
+    return true;
   } catch (error) {
     console.error('Error deploying smart account:', error);
-    return null;
+    return false;
   }
 }
 
@@ -93,56 +106,72 @@ export async function handleDeploymentBeforeTransaction(
     
     console.log('Smart account not deployed, initiating deployment process...');
     
-    // Get the server key from the database
+    // Get the server key from database - we'll use this for deployment
+    // Note: According to logs, server_key_encrypted exists but device_key_encrypted doesn't
     const { data: userData, error: userError } = await supabase
       .from('users')
       .select('server_key_encrypted')
-      .eq('id', userId);
+      .eq('id', userId)
+      .single();
       
     if (userError) {
-      console.error('Failed to fetch user data for deployment:', userError.message, userError.code, userError.details);
+      console.error('Failed to fetch user data for deployment:', userError.message);
       return false;
     }
 
-    if (!userData || userData.length === 0 || !userData[0]?.server_key_encrypted) {
+    if (!userData?.server_key_encrypted) {
       console.error('Server key not found for user:', userId);
       return false;
     }
     
-    // Get the server key (this is safer than using device key)
-    let serverKey;
-    try {
-      serverKey = decryptPrivateKey(
-        userData[0].server_key_encrypted,
-        process.env.KEY_ENCRYPTION_KEY || ''
-      );
-      
-      if (!serverKey) {
-        console.error('Failed to decrypt server key');
-        return false;
-      }
-    } catch (error) {
-      console.error('Error decrypting server key:', error);
+    // Get the server key for this user
+    const serverKey = decryptPrivateKey(
+      userData.server_key_encrypted,
+      process.env.KEY_ENCRYPTION_KEY || ''
+    );
+    
+    if (!serverKey) {
+      console.error('Failed to decrypt server key');
       return false;
     }
     
-    // Create deployment account and client setup
-    const deploymentAccount = privateKeyToAccount(serverKey as `0x${string}`);
-    console.log('Created deployment account:', deploymentAccount.address);
+    // Create an account from the server key
+    const deployAccount = privateKeyToAccount(serverKey as `0x${string}`);
+    console.log('Created deployment account:', deployAccount.address);
     
     // Setup the client
-    const clientSetup = await createSafeAccountClient(deploymentAccount);
+    const publicClient = createChainPublicClient();
+    const pimlicoClient = createPimlicoClientInstance(process.env.PIMLICO_API_KEY || '');
+    
+    // Create smart account with the device key as the owner
+    const smartAccount = await createSafeSmartAccount(publicClient, deployAccount);
+    
+    // We'll use the actual wallet address instead of calculating a new one based on the deployment account
+    // This ensures we use the address that has the funds
+    
+    const activeChain = getActiveChain();
+    const pimlicoUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
+    
+    // Create the smart account client (no paymaster, will use the funds in the address)
+    const smartAccountClient = createSmartAccountClientWithPaymaster(
+      smartAccount,
+      pimlicoClient,
+      pimlicoUrl
+    );
+    
     const fullClientSetup = {
-      owner: deploymentAccount,
-      smartAccount: clientSetup.smartAccount,
-      smartAccountClient: clientSetup.smartAccountClient,
-      publicClient: clientSetup.publicClient,
-      pimlicoClient: clientSetup.pimlicoClient
+      owner: deployAccount,
+      smartAccount,
+      smartAccountClient,
+      publicClient,
+      pimlicoClient
     };
     
-    // Deploy the account
-    const deployedAddress = await deploySmartAccount(fullClientSetup);
-    if (!deployedAddress) {
+    // Deploy the account using the funds in the smart account address
+    console.log(`Deploying smart account ${walletAddress}...`);
+    const deployResult = await deploySmartAccount(fullClientSetup, walletAddress);
+    
+    if (!deployResult) {
       console.error('Failed to deploy smart account');
       return false;
     }

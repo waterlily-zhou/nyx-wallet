@@ -125,7 +125,7 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
                 </div>
               )}
               {(status === 'error' || status === 'needsFunds') && (
-                <div className="w-8 h-8 bg-rose-500 rounded-full flex items-center justify-center">
+                <div className="w-8 h-8 bg-red-500 rounded-full flex items-center justify-center">
                   <svg className="w-5 h-5 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
                     <path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M6 18L18 6M6 6l12 12"></path>
                   </svg>
@@ -142,10 +142,10 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
                 {status === 'error' && 'Deployment failed'}
               </p>
               {errorMessage && status === 'error' && (
-                <p className="text-rose-400 text-sm mt-1">{errorMessage}</p>
+                <p className="text-red-400 text-sm mt-1">{errorMessage}</p>
               )}
               {status === 'needsFunds' && (
-                <p className="text-rose-500 text-sm mt-1">
+                <p className="text-yellow-400 text-sm mt-1">
                   Send ~0.01 ETH to your smart account address to cover deployment costs.
                 </p>
               )}
@@ -155,7 +155,7 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
           {/* Funds explanation section when funds are needed */}
           {status === 'needsFunds' && (
             <div className="bg-zinc-800 p-3 rounded-md mb-4">
-              <h3 className="text-rose-500 text-sm font-medium mb-2">Why does my address need ETH?</h3>
+              <h3 className="text-yellow-400 text-sm font-medium mb-2">Why does my address need ETH?</h3>
               <p className="text-gray-300 text-xs mb-2">
                 Your smart account is created at a counterfactual address (calculated before deployment),
                 but deploying the actual contract requires gas fees.

@@ -1,7 +1,7 @@
 'use server';
 
 import { checkSmartAccountDeployed, handleDeploymentBeforeTransaction } from '@/lib/wallet/deploy';
-import { Address } from 'viem';
+import { Address, formatEther, parseEther } from 'viem';
 
 // Map to store logs for each wallet address
 const deploymentLogs = new Map<string, string[]>();
@@ -42,6 +42,30 @@ export async function checkDeploymentStatus(address: Address): Promise<{
 }
 
 /**
+ * Function to check the balance of an address
+ */
+async function checkBalance(address: Address): Promise<{
+  balance: bigint;
+  hasEnoughFunds: boolean;
+}> {
+  try {
+    // Import publicClient dynamically to avoid issues with server components
+    const { publicClient } = await import('@/lib/viem/client');
+    
+    const balance = await publicClient.getBalance({ address });
+    const minRequired = parseEther('0.005'); // ~0.005 ETH minimum
+    
+    return {
+      balance,
+      hasEnoughFunds: balance >= minRequired
+    };
+  } catch (error) {
+    console.error('Failed to check balance:', error);
+    return { balance: 0n, hasEnoughFunds: false };
+  }
+}
+
+/**
  * Server-side function to deploy a smart account
  */
 export async function deploySmartAccount(userId: string, address: Address): Promise<{
@@ -56,7 +80,7 @@ export async function deploySmartAccount(userId: string, address: Address): Prom
   }
   
   const logs = deploymentLogs.get(addressLower) || [];
-  logs.push(`Starting deployment for address: ${address}`);
+  logs.push(`Starting deployment process for address: ${address}`);
   
   try {
     // First check if already deployed
@@ -72,32 +96,59 @@ export async function deploySmartAccount(userId: string, address: Address): Prom
     
     logs.push(`Smart account is not yet deployed. Checking for funds...`);
     
-    // Instead of using server key, explain the requirements
-    logs.push(`IMPORTANT: Your smart account needs ETH to pay for its own deployment.`);
-    logs.push(`Please ensure address ${address} has at least 0.01 ETH before continuing.`);
+    // Check if the address has enough ETH for deployment
+    const { balance, hasEnoughFunds } = await checkBalance(address);
+    logs.push(`Current balance: ${formatEther(balance)} ETH`);
     
-    // For the simulation, send an initiate deployment command but don't report success yet
-    logs.push(`Attempting to deploy smart account using funds from the address itself...`);
-    
-    // Simulate the deployment attempt 
-    await new Promise(r => setTimeout(r, 2000));
-    
-    // After the deployment attempt, check again if it's really deployed
-    const deployVerification = await checkSmartAccountDeployed(address);
-    
-    if (deployVerification) {
-      logs.push(`Deployment successful! Your smart account is now ready to use.`);
-      return {
-        success: true, 
-        message: 'Smart account deployed successfully',
-        logs: [...logs]
-      };
-    } else {
-      logs.push(`Deployment incomplete - smart account not found on chain.`);
-      logs.push(`This usually means your address needs more ETH to cover deployment costs.`);
+    if (!hasEnoughFunds) {
+      logs.push(`IMPORTANT: Your smart account needs ETH to pay for its own deployment.`);
+      logs.push(`Please ensure address ${address} has at least 0.01 ETH before continuing.`);
       return {
         success: false,
-        message: 'Smart account deployment requires more funds',
+        message: 'Smart account needs more ETH for deployment',
+        logs: [...logs]
+      };
+    }
+    
+    logs.push(`Found sufficient funds (${formatEther(balance)} ETH). Proceeding with deployment...`);
+    
+    // Actually deploy the smart account using handleDeploymentBeforeTransaction
+    logs.push(`Initiating smart account deployment...`);
+    
+    // This is where we actually call the deployment function
+    const deploymentResult = await handleDeploymentBeforeTransaction(userId, address);
+    
+    if (deploymentResult) {
+      logs.push(`Deployment transaction sent successfully!`);
+      logs.push(`Waiting for confirmation...`);
+      
+      // Add a small delay to ensure network propagation
+      await new Promise(r => setTimeout(r, 3000));
+      
+      // Verify that deployment was successful
+      const verificationResult = await checkSmartAccountDeployed(address);
+      
+      if (verificationResult) {
+        logs.push(`Deployment successful! Your smart account is now ready to use.`);
+        return {
+          success: true, 
+          message: 'Smart account deployed successfully',
+          logs: [...logs]
+        };
+      } else {
+        logs.push(`Deployment transaction was processed, but verification failed.`);
+        logs.push(`This could be due to network delays. Try again in a few moments.`);
+        return {
+          success: false,
+          message: 'Deployment transaction sent but not yet confirmed',
+          logs: [...logs]
+        };
+      }
+    } else {
+      logs.push(`Deployment failed. Please check your wallet's funds and try again.`);
+      return {
+        success: false,
+        message: 'Failed to deploy smart account',
         logs: [...logs]
       };
     }
