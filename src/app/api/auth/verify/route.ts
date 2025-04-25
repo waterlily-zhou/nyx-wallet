@@ -22,18 +22,6 @@ export async function POST(request: NextRequest) {
     console.log('User session:', await supabase.auth.getSession());
     console.log('API: Verify endpoint called');
 
-    //! TESTING
-    const rawId = 'PEfr3iEhUN351Z8xhS6TMA7lz9U=';
-
-    console.log('Running raw query...');
-    let res = await supabase.from('authenticators').select('*').eq('credential_id', rawId);
-    console.log('Raw result:', res.data);
-
-    console.log('Running buffer query...');
-    let buf = Buffer.from(rawId, 'base64');
-    res = await supabase.from('authenticators').select('*').eq('credential_id', buf);
-    console.log('Buffer result:', res.data);
-    //! END TESTING
     // First check if we have the service role key available
     const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
     if (!serviceRoleKey) {
@@ -58,9 +46,61 @@ export async function POST(request: NextRequest) {
         console.error('Direct Supabase test failed:', testError.message);
       } else {
         console.log(`Direct Supabase test successful, found ${testData?.length || 0} authenticators`);
+        
+        // Raw SQL query to check credential_id format and type
+        console.log('Running raw query...');
+        const { data: rawData, error: rawError } = await supabase
+          .rpc('dump_credential_details');
+          
+        if (rawError) {
+          console.error('Raw query failed:', rawError);
+        } else {
+          console.log('Raw result:', rawData);
+        }
+        
+        // Try with buffer conversion
+        console.log('Running buffer query...');
+        const { data: bufData, error: bufError } = await supabase
+          .from('authenticators')
+          .select('credential_id, id, user_id');
+          
+        if (bufError) {
+          console.error('Buffer query failed:', bufError);
+        } else {
+          console.log('Buffer result:', bufData);
+          
+          // If we found data, try querying with the exact credential_id from the database
+          if (bufData && bufData.length > 0) {
+            const firstCredId = bufData[0].credential_id;
+            console.log(`Testing query with credential_id: ${firstCredId}`);
+            
+            const { data: testCredData, error: testCredError } = await supabase
+              .from('authenticators')
+              .select('*')
+              .eq('credential_id', firstCredId);
+              
+            if (testCredError) {
+              console.error('Test credential query failed:', testCredError);
+            } else {
+              console.log('Test credential result:', testCredData);
+            }
+          }
+        }
       }
     } catch (testErr) {
       console.error('Direct Supabase test error:', testErr);
+    }
+    
+    // Create a function to dump RPC
+    try {
+      const { error: rpcError } = await supabase.rpc('create_dump_credentials_function');
+      if (rpcError) {
+        console.error('Failed to create RPC function:', rpcError);
+      } else {
+        console.log('RPC function created successfully');
+      }
+    } catch (rpcErr) {
+      console.error('Error creating RPC function:', rpcErr);
     }
     
     const cookieStore = cookies();

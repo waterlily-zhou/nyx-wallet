@@ -15,12 +15,16 @@ import { createPublicClientForSepolia } from '../client-setup';
 import { createPimlicoClient } from 'permissionless/clients/pimlico';
 import { createSmartAccountClient } from 'permissionless';
 import { toSafeSmartAccount } from 'permissionless/accounts';
-// Import Supabase client
-import { supabase } from '../supabase/client';
+// Import Supabase clients with distinct names
+import { supabase as supabaseClient } from '../supabase/client';
+import { supabase as supabaseServer } from '../supabase/server';
 import { entropyToMnemonic } from '@scure/bip39';
 // Import wordlist
 import { wordlist } from '@scure/bip39/wordlists/english';
 import { encryptPrivateKey, decryptPrivateKey } from './key-encryption';
+
+// Use server-side Supabase for all database operations
+const supabase = supabaseServer;
 
 // Define WebAuthn settings locally
 export const rpName = 'Nyx Wallet';
@@ -965,33 +969,87 @@ export async function findUserByCredentialId(credentialId: string) {
       formats.push(padded);
     }
     
+    // For bytea column handling
+    try {
+      // Convert to actual bytes and back to different formats
+      const decoded = Buffer.from(credentialId, 'base64');
+      // Add hex encoding
+      formats.push(decoded.toString('hex'));
+      // Add raw buffer representation for bytea column
+      // Note: Supabase may not handle this correctly in JS
+    } catch (e) {
+      console.log('Could not perform bytea conversion:', e);
+    }
+    
     console.log('🔍 Will try these credential ID formats:', formats);
     
-    // Try to find the authenticator with any of these credential ID formats
+    // Try an initial SQL query that doesn't filter by credential_id 
     let authenticator = null;
     let formatUsed = null;
     
-    for (const format of formats) {
-      // Query with the current format
-      console.log(`🔍 Trying credential_id="${format}"`);
+    // First, try to get all authenticators and check in JS
+    console.log('🔍 Querying all authenticators to check in JS...');
+    const { data: allAuths, error: listError } = await supabase
+      .from('authenticators')
+      .select('credential_id, user_id');
       
-      const { data, error } = await supabase
-        .from('authenticators')
-        .select('user_id')
-        .eq('credential_id', format);
+    if (listError) {
+      console.error('❌ Error querying all authenticators:', listError.message);
+    } else if (allAuths && allAuths.length > 0) {
+      console.log('✅ Found authenticators:', allAuths.length);
+      
+      // Try to manually match credential_id with fuzzy matching
+      for (const auth of allAuths) {
+        const dbCredId = auth.credential_id;
+        console.log(`Comparing DB credential ${dbCredId} with ${credentialId}`);
         
-      if (error) {
-        console.error(`❌ Error with format "${format}":`, error.message);
-        continue;
+        // Try exact match
+        if (dbCredId === credentialId) {
+          console.log('✅ Found exact match!');
+          authenticator = auth;
+          formatUsed = 'exact';
+          break;
+        }
+        
+        // Try with padding removed
+        const normalizedDbCredId = dbCredId.replace(/=+$/, '');
+        const normalizedCredId = credentialId.replace(/=+$/, '');
+        
+        if (normalizedDbCredId === normalizedCredId) {
+          console.log('✅ Found match after normalizing padding!');
+          authenticator = auth;
+          formatUsed = 'normalized';
+          break;
+        }
       }
-      
-      if (data && data.length > 0) {
-        console.log(`✅ Found authenticator with format "${format}"!`);
-        authenticator = data[0];
-        formatUsed = format;
-        break;
-      } else {
-        console.log(`❌ No authenticator found with format "${format}"`);
+    } else {
+      console.log('📋 No authenticators found in database');
+    }
+    
+    // If we still don't have a match, try database queries with different formats
+    if (!authenticator) {
+      for (const format of formats) {
+        // Query with the current format
+        console.log(`🔍 Trying credential_id="${format}"`);
+        
+        const { data, error } = await supabase
+          .from('authenticators')
+          .select('user_id')
+          .eq('credential_id', format);
+          
+        if (error) {
+          console.error(`❌ Error with format "${format}":`, error.message);
+          continue;
+        }
+        
+        if (data && data.length > 0) {
+          console.log(`✅ Found authenticator with format "${format}"!`);
+          authenticator = data[0];
+          formatUsed = format;
+          break;
+        } else {
+          console.log(`❌ No authenticator found with format "${format}"`);
+        }
       }
     }
 
@@ -999,15 +1057,21 @@ export async function findUserByCredentialId(credentialId: string) {
     if (!authenticator) {
       console.error('❌ No authenticator found for any credential ID format');
       
-      // DEBUG: List all authenticators for troubleshooting
-      const { data: allAuths, error: listError } = await supabase
-        .from('authenticators')
-        .select('credential_id, user_id');
+      // Try RAW SQL as a last resort
+      try {
+        const { data: rawData, error: rawError } = await supabase.rpc('find_by_credential', { cred_id: credentialId });
         
-      if (!listError && allAuths) {
-        console.log('📋 Available authenticators in database:', allAuths);
+        if (!rawError && rawData && rawData.length > 0) {
+          console.log('✅ Found user using raw SQL query!', rawData[0]);
+          return rawData[0];
+        } else {
+          console.log('❌ Raw SQL query also failed:', rawError?.message);
+        }
+      } catch (sqlErr) {
+        console.error('❌ Error with raw SQL query:', sqlErr);
       }
       
+      // Give up
       return null;
     }
 
