@@ -40,7 +40,7 @@ export default function DashboardSidebar({
     const checkDeployment = async () => {
       // Use the server action instead of direct function call
       const deployed = await checkDeploymentStatus(walletAddress);
-      setIsDeployed(deployed);
+      setIsDeployed(deployed.isDeployed);
     };
     
     checkDeployment();
