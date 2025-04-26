@@ -60,12 +60,12 @@ const supabaseServiceRoleKey = getEnvVariable('SUPABASE_SERVICE_ROLE_KEY');
 
 // Detailed logging for environment variable issues in development mode
 if (process.env.NODE_ENV === 'development') {
-  console.log('Supabase server environment check:', {
+/*   console.log('Supabase server environment check:', {
     'NEXT_PUBLIC_SUPABASE_URL': supabaseUrl ? `present (${supabaseUrl.substring(0, 15)}...)` : 'MISSING',
     'SUPABASE_SERVICE_ROLE_KEY': supabaseServiceRoleKey ? 
       `present (length: ${supabaseServiceRoleKey.length}, starts with: ${supabaseServiceRoleKey.substring(0, 5)}...)` : 
       'MISSING',
-  });
+  }); */
   
   if (!supabaseUrl || !supabaseServiceRoleKey) {
     console.error('⚠️ CRITICAL ERROR: Missing Supabase environment variables!');
@@ -102,7 +102,7 @@ async function testSupabaseConnection() {
   
   try {
     // Test with a simple query first
-    console.log('Testing Supabase connection with service role key...');
+    /* console.log('Testing Supabase connection with service role key...'); */
     const { data: testData, error: testError } = await supabase.from('authenticators').select('count').limit(1);
     
     if (testError) {

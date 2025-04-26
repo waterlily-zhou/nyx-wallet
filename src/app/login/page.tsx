@@ -5,7 +5,8 @@ import { useRouter } from 'next/navigation';
 import { cookies } from 'next/headers';
 import { useBiometricAuth } from '@/lib/hooks/useBiometricAuth';
 import { useAdvancedWebAuthn, type WebAuthnResult } from '@/lib/hooks/useAdvancedWebAuthn';
-import { generateAndStoreDeviceKey } from '@/lib/client/secure-storage';
+import { generateAndStoreDeviceKey, storeDeviceKey } from '@/lib/client/secure-storage';
+import DeviceKeyStorage from '@/components/DeviceKeyStorage';
 import { type Hex } from 'viem';
 
 export default function LoginPage() {
@@ -28,6 +29,9 @@ export default function LoginPage() {
   const [showNoWalletMessage, setShowNoWalletMessage] = useState(false);
   const [showDebugLog, setShowDebugLog] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [hasCredentials, setHasCredentials] = useState<boolean | null>(null);
+  const [userId, setUserId] = useState<string | null>(null);
+  const [deviceKey, setDeviceKey] = useState<string | null>(null);
   
   const addDebugLog = (message: string) => {
     console.log(message);
@@ -255,6 +259,13 @@ export default function LoginPage() {
             return;
           }
 
+          // Save userId and deviceKey for storage via the useEffect
+          setUserId(userId);
+          if (result.deviceKey) {
+            setDeviceKey(result.deviceKey);
+            addDebugLog(`Device key received from registration: ${result.deviceKey.slice(0, 10)}...`);
+          }
+
           // Check if we already got a wallet address from registration
           if (result.walletAddress && result.recoveryKey) {
             addDebugLog(`Registration successful with wallet address: ${result.walletAddress}`);
@@ -344,10 +355,28 @@ export default function LoginPage() {
     }
   };
 
+  // Effect to store device key when userId and deviceKey are available
+  useEffect(() => {
+    const storeUserDeviceKey = async () => {
+      if (userId && deviceKey && showRecoveryKey) {
+        try {
+          addDebugLog(`Storing device key for user ${userId}`);
+          await storeDeviceKey(userId, deviceKey as Hex);
+          addDebugLog('Device key stored successfully in localStorage');
+        } catch (error) {
+          console.error('Failed to store device key:', error);
+          addDebugLog(`Error storing device key: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    };
+
+    storeUserDeviceKey();
+  }, [userId, deviceKey, showRecoveryKey]);
+
   // Success UI with recovery key
   if (showRecoveryKey) {
     return (
-      <div className="w-full max-w-md flex flex-col items-center justify-center p-4">
+      <div className="w-full mx-auto max-w-md flex flex-col items-center justify-center p-4">
         <div className="w-16 h-16 rounded-full bg-violet-500 flex items-center justify-center mb-4">
           <svg className="w-10 h-10 text-black" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
             <path d="M22 6L9 17L4 12" stroke="currentColor" strokeWidth="4" strokeLinecap="round" strokeLinejoin="round"/>
@@ -362,7 +391,7 @@ export default function LoginPage() {
             <div className="p-2 rounded-lg flex items-center justify-between text-sm text-gray-100">
               <div className="font-mono break-all flex-1 mr-2 overflow-hidden text-ellipsis flex items-center">
                 <div className="w-16 h-11 rounded-full bg-violet-500 mr-2"></div>
-                {walletAddress}0xB54386807C666eB1a0EBa45536aa3466e358B012
+                {walletAddress}
               </div>
               <div className="flex items-center space-x-2">
                 <button 
@@ -396,8 +425,8 @@ export default function LoginPage() {
             <p className="absolute -top-2.5 left-2 text-sm text-slate-300 px-1 bg-black">
               Recovery Key
             </p>
-            <div className="flex items-center gap-4 text-sm text-gray-400 bg-slate-900 p-2 rounded-lg font-mono break-all text-gray-200 mb-2">
-              {recoveryKey}0xB54386807C666eB1a0EBa45536aa3466e358B012
+            <div className="flex items-center gap-4 text-xs text-gray-400 bg-gray-900 p-2 rounded-lg font-mono break-all text-gray-200 mb-2">
+              {recoveryKey}
               <button 
                   onClick={() => copyToClipboard(recoveryKey || '')}
                   className="p-1.5 text-gray-400 hover:text-gray-200 bg-gray-800 rounded-md transition-colors"

@@ -18,6 +18,7 @@ export type WebAuthnResult = {
   userId?: string;
   walletAddress?: string;
   recoveryKey?: string;
+  deviceKey?: string;
 };
 
 /**
@@ -211,22 +212,26 @@ export function useAdvancedWebAuthn() {
       
       if (!verificationResponse.ok) {
         const error = await verificationResponse.json();
-        console.error('❌ Registration verification failed with server:', error);
-        throw new Error(error.message || 'Registration verification failed');
+        throw new Error(error.error || 'Registration verification failed');
       }
       
       const result = await verificationResponse.json();
-      console.log('✅ Registration verified with server, result:', result);
+      
+      if (!result.success) {
+        throw new Error(result.error || 'Registration verification failed');
+      }
       
       // Add the new credential to our list
       setAvailableCredentials(prev => [...prev, credential.id]);
       
+      // Return the full result including deviceKey if it exists
       return {
         success: true,
         credential,
         userId: result.userId,
         walletAddress: result.walletAddress,
-        recoveryKey: result.recoveryKey
+        recoveryKey: result.recoveryKey,
+        deviceKey: result.deviceKey
       };
     } catch (err) {
       const errorMessage = err instanceof Error ? err.message : 'Registration failed';

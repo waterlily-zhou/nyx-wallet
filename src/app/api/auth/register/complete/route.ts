@@ -14,7 +14,7 @@ export async function POST(request: NextRequest) {
     console.log('API: Registration completion endpoint called');
     
     // Validate KEY_ENCRYPTION_KEY is set and has sufficient entropy
-    console.log('KEY_ENCRYPTION_KEY:', process.env.KEY_ENCRYPTION_KEY?.length);
+    
     validateKeyEncryptionKey();
    
     // Get verification data
@@ -205,7 +205,8 @@ export async function POST(request: NextRequest) {
           message: 'Registration successful',
           recoveryKey,
           walletAddress: address,
-          userId: userId
+          userId: userId,
+          deviceKey: deviceKey
         });
       } catch (scaError) {
         console.error('API: Error creating Smart Contract Account:', scaError);

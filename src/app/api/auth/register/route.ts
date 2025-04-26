@@ -103,12 +103,8 @@ export async function POST(request: NextRequest) {
         maxAge: 5 * 60, // 5 minutes
       });
       
-      // Store the keys temporarily
-      cookieStore.set('register_keys', JSON.stringify({
-        deviceKey,
-        serverKey,
-        recoveryKey
-      }), {
+      // Store the keys in a cookie
+      cookieStore.set('register_keys', JSON.stringify({ deviceKey, serverKey, recoveryKey }), {
         httpOnly: true,
         secure: process.env.NODE_ENV === 'production',
         sameSite: 'strict',

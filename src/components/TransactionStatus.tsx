@@ -2,7 +2,6 @@
 
 import { useState, useEffect, useRef } from 'react';
 import { startAuthentication } from '@simplewebauthn/browser';
-import { getDeviceKey } from '@/lib/client/secure-storage';
 import { useTransaction } from '@/contexts/TransactionContext';
 import type { Hex } from 'viem';
 

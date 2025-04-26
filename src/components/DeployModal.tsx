@@ -49,6 +49,17 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
           // Get device key from secure storage
           const deviceKey = await getDeviceKey(userId);
           if (!deviceKey) {
+            addLog('❌ Device key not found in secure storage. Attempting recovery...');
+            
+            // Add more detailed logging for debugging
+            addLog(`Debug info: userId=${userId}, browser=${navigator.userAgent}`);
+            addLog('If this persists, you may need to recover your wallet using your recovery phrase.');
+            
+            // TODO: Here you could implement a key recovery flow, such as:
+            // 1. Attempt to regenerate from seed phrase
+            // 2. Offer to restore from backup
+            // 3. Guide user through recovery process
+            
             throw new Error('Device key not found in secure storage');
           }
           addLog('Successfully retrieved device key from secure storage.');
@@ -300,6 +311,14 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
         // Get device key from secure storage
         const deviceKey = await getDeviceKey(userId);
         if (!deviceKey) {
+          setLog(prev => [
+            ...prev, 
+            `[${new Date().toLocaleTimeString()}] ❌ Device key not found in secure storage. Attempting recovery...`,
+            `[${new Date().toLocaleTimeString()}]    Debug info: userId=${userId}, browser=${navigator.userAgent}`,
+            `[${new Date().toLocaleTimeString()}]    If this persists, you may need to recover your wallet using your recovery phrase.`
+          ]);
+          setStatus('error');
+          setErrorMessage('Device key not found. Please recover your wallet using your recovery phrase.');
           throw new Error('Device key not found in secure storage');
         }
         setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Successfully retrieved device key from secure storage.`]);

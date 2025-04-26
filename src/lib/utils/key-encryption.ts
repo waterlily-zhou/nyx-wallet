@@ -252,7 +252,8 @@ export function decryptPrivateKey(encryptedKey: string, encryptionKey: string): 
  */
 export function validateKeyEncryptionKey(): void {
   const key = process.env.KEY_ENCRYPTION_KEY;
-  console.log('KEY_ENCRYPTION_KEY:', key);
+  /* console.log('KEY_ENCRYPTION_KEY:', process.env.KEY_ENCRYPTION_KEY?.length); */
+  /* console.log('KEY_ENCRYPTION_KEY:', key); */
   if (!key) {
     throw new Error('KEY_ENCRYPTION_KEY environment variable is not set');
   }
