@@ -10,12 +10,21 @@ import { type Hex } from 'viem';
 // Key for storing device key
 const DEVICE_KEY_STORAGE_KEY = 'nyx_device_key';
 
+// Check if running in browser environment
+const isBrowser = typeof window !== 'undefined';
+
 /**
  * Securely stores a device key in the browser's secure storage
  * Uses IndexedDB for storage and encrypts with device key derivation
  */
 export async function storeDeviceKey(userId: string, deviceKey: Hex): Promise<void> {
   try {
+    // Skip if not in browser environment
+    if (!isBrowser) {
+      console.log('Running on server, skipping localStorage initialization');
+      return;
+    }
+
     // In a production environment, you would use hardware-backed secure storage
     // For example:
     // - WebAuthn/FIDO2 credentials
@@ -43,6 +52,12 @@ export async function storeDeviceKey(userId: string, deviceKey: Hex): Promise<vo
  */
 export async function getDeviceKey(userId: string): Promise<Hex | null> {
   try {
+    // Skip if not in browser environment
+    if (!isBrowser) {
+      console.log('Running on server, cannot access localStorage');
+      return null;
+    }
+    
     // Get encrypted device key
     const encrypted = localStorage.getItem(`${DEVICE_KEY_STORAGE_KEY}_${userId}`);
     if (!encrypted) {
@@ -66,6 +81,12 @@ export async function getDeviceKey(userId: string): Promise<Hex | null> {
  */
 export async function generateAndStoreDeviceKey(userId: string): Promise<Hex> {
   try {
+    // Skip if not in browser environment
+    if (!isBrowser) {
+      console.log('Running on server, cannot generate device key');
+      throw new Error('Cannot generate device key on server');
+    }
+    
     // Generate a new random key
     const deviceKey = await generateRandomKey();
     
@@ -83,6 +104,10 @@ export async function generateAndStoreDeviceKey(userId: string): Promise<Hex> {
  * Checks if a device key exists for the given user
  */
 export function hasDeviceKey(userId: string): boolean {
+  if (!isBrowser) {
+    console.log('Running on server, cannot check for device key');
+    return false;
+  }
   return localStorage.getItem(`${DEVICE_KEY_STORAGE_KEY}_${userId}`) !== null;
 }
 

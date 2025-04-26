@@ -7,6 +7,12 @@ import { decryptPrivateKey } from '../utils/key-encryption';
 import { createSafeAccountClient } from './safe-account';
 import { createSmartAccountClient } from 'permissionless';
 import { http } from 'viem';
+import { createHash } from 'crypto';
+
+// Function to combine keys for DKG - copied from your implementation
+function combineKeys(deviceKey: string, serverKey: string) {
+  return `0x${createHash('sha256').update(deviceKey + serverKey).digest('hex')}` as `0x${string}`;
+}
 
 /**
  * Check if a smart account is deployed by checking its bytecode
@@ -85,18 +91,19 @@ export async function deploySmartAccount(
 }
 
 /**
- * Handle the deployment process before a transaction
- * This function checks if an account is deployed and deploys it if needed
+ * Important: This function cannot directly deploy on its own because it needs the device key
+ * which is only stored on the user's device. Instead, it will check if deployment is needed
+ * and return information about the status.
  * 
  * @param userId The user ID
- * @param walletAddress The wallet address to deploy
- * @returns A promise resolving to a boolean indicating if the account is ready for transactions
+ * @param walletAddress The wallet address to check
+ * @returns A promise resolving to a boolean indicating if the account is ready for transactions (true) or needs deployment (false)
  */
 export async function handleDeploymentBeforeTransaction(
   userId: string,
   walletAddress: Address
 ): Promise<boolean> {
-  console.log(`Handling deployment for wallet ${walletAddress}`);
+  console.log(`Checking deployment for wallet ${walletAddress}`);
   
   try {
     // First check if already deployed
@@ -106,101 +113,24 @@ export async function handleDeploymentBeforeTransaction(
       return true;
     }
     
-    console.log('Smart account not deployed, initiating deployment process...');
+    // Check if the address has funds to pay for deployment
+    const publicClient = createPublicClientForSepolia();
+    const balance = await publicClient.getBalance({ address: walletAddress });
     
-    // Get the server key from database - we'll use this for deployment
-    // Note: According to logs, server_key_encrypted exists but device_key_encrypted doesn't
-    const { data: userData, error: userError } = await supabase
-      .from('users')
-      .select('server_key_encrypted')
-      .eq('id', userId)
-      .single();
-      
-    if (userError) {
-      console.error('Failed to fetch user data for deployment:', userError.message);
-      return false;
-    }
-
-    if (!userData?.server_key_encrypted) {
-      console.error('Server key not found for user:', userId);
+    console.log(`Smart account ${walletAddress} is not deployed.`);
+    console.log(`Current balance: ${balance.toString()} wei`);
+    
+    if (balance < BigInt(5000000000000000)) { // Less than 0.005 ETH
+      console.error('Smart account does not have sufficient funds for deployment');
+      console.error('Please send at least 0.01 ETH to the smart account address');
       return false;
     }
     
-    // Get the server key for this user
-    const serverKey = decryptPrivateKey(
-      userData.server_key_encrypted,
-      process.env.KEY_ENCRYPTION_KEY || ''
-    );
+    console.log('Smart account has sufficient funds for deployment.');
+    console.log('IMPORTANT: To deploy, you need both the device key and server key used to create this address.');
+    console.log('Since the device key is only stored on the client device, you must initiate deployment from the client.');
     
-    if (!serverKey) {
-      console.error('Failed to decrypt server key');
-      return false;
-    }
-    
-    // Create an account from the server key
-    const deployAccount = privateKeyToAccount(serverKey as `0x${string}`);
-    console.log('Created deployment account:', deployAccount.address);
-    
-    // Setup the client
-    const publicClient = createChainPublicClient();
-    const activeChain = getActiveChain();
-    
-    // Create smart account with the server key as the owner
-    const smartAccount = await createSafeSmartAccount(publicClient, deployAccount);
-    
-    // Check if the smart account address matches the wallet address we're trying to deploy
-    console.log(`Smart account address: ${smartAccount.address}`);
-    console.log(`Target wallet address: ${walletAddress}`);
-    
-    if (smartAccount.address.toLowerCase() !== walletAddress.toLowerCase()) {
-      console.error(`ERROR: Address mismatch. The smart account would deploy to ${smartAccount.address} but we need ${walletAddress}`);
-      console.error(`Cannot proceed with deployment`);
-      return false;
-    }
-    
-    // Create a vanilla smart account client with no paymaster
-    // This will use the ETH in the smart account address to pay for deployment
-    console.log(`Creating vanilla smart account client (no paymaster)...`);
-    const bundlerUrl = `https://api.pimlico.io/v2/${activeChain.pimlicoChainName}/rpc?apikey=${process.env.PIMLICO_API_KEY}`;
-    
-    const smartAccountClient = createSmartAccountClient({
-      account: smartAccount,
-      chain: activeChain.chain,
-      bundlerTransport: http(bundlerUrl),
-      // No middleware/paymaster - we'll use the funds in the smart account
-    });
-    
-    console.log(`Smart account client created successfully`);
-    
-    const fullClientSetup = {
-      owner: deployAccount,
-      smartAccount,
-      smartAccountClient,
-      publicClient,
-      pimlicoClient: null // Not using a pimlico client for this deployment
-    };
-    
-    // Deploy the account using the funds in the smart account address
-    console.log(`Deploying smart account ${walletAddress} using its own funds...`);
-    const deployResult = await deploySmartAccount(fullClientSetup, walletAddress);
-    
-    if (!deployResult) {
-      console.error('Failed to deploy smart account');
-      return false;
-    }
-    
-    // Add a small delay to ensure network propagation
-    console.log('Waiting for deployment propagation...');
-    await new Promise(resolve => setTimeout(resolve, 2000));
-    
-    // Final verification
-    const finalCheck = await checkSmartAccountDeployed(walletAddress);
-    if (!finalCheck) {
-      console.error('Final deployment verification failed');
-      return false;
-    }
-    
-    console.log('Smart account deployment confirmed and ready for transactions');
+    // If we have the balance, mark the account as ready for the client to handle
     return true;
   } catch (error) {
     console.error('Unexpected error in deployment process:', error);

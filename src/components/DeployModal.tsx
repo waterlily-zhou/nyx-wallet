@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { Address } from 'viem';
 import { deploySmartAccount, checkDeploymentStatus } from '@/lib/actions/deploy-actions';
+import { getDeviceKey } from '@/lib/client/secure-storage';
 
 interface DeployModalProps {
   isOpen: boolean;
@@ -12,7 +13,7 @@ interface DeployModalProps {
 }
 
 export default function DeployModal({ isOpen, onClose, walletAddress, userId }: DeployModalProps) {
-  const [status, setStatus] = useState<'idle' | 'checking' | 'deploying' | 'needsFunds' | 'success' | 'error'>('idle');
+  const [status, setStatus] = useState<'idle' | 'checking' | 'retrievingKey' | 'deploying' | 'needsFunds' | 'success' | 'error'>('idle');
   const [log, setLog] = useState<string[]>([]);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
   
@@ -41,39 +42,78 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
         }
         
         // Start deployment flow
-        setStatus('deploying');
-        addLog('Smart account needs to be deployed.');
-        addLog(`IMPORTANT: Your smart account address ${walletAddress} needs some ETH to pay for its own deployment.`);
+        setStatus('retrievingKey');
+        addLog('Smart account needs to be deployed. Retrieving device key from secure storage...');
         
-        // Deploy using the server action
-        const result = await deploySmartAccount(userId, walletAddress);
-        
-        // Add server logs to our log
-        result.logs.forEach(logMessage => {
-          addLog(logMessage);
-        });
-        
-        // After deployment attempt, verify deployment status again
-        const verifyResult = await checkDeploymentStatus(walletAddress);
-        verifyResult.logs.forEach(logMsg => addLog(logMsg));
-        
-        if (verifyResult.isDeployed) {
-          setStatus('success');
-          addLog('✅ Deployment verified! Smart account is now deployed.');
-        } else if (result.success) {
-          // The deployment action reported success but verification shows it's not deployed
-          setStatus('error');
-          setErrorMessage('Deployment reported success but verification failed. Please try again.');
-          addLog('❌ Deployment verification failed - contract not found on chain.');
-        } else {
-          // Check if this is a funds issue
-          if (result.message.includes('funds') || result.logs.some(log => log.includes('funds'))) {
-            setStatus('needsFunds');
-            addLog('❌ Your smart account needs ETH to deploy.');
-          } else {
+        try {
+          // Get device key from secure storage
+          const deviceKey = await getDeviceKey(userId);
+          if (!deviceKey) {
+            throw new Error('Device key not found in secure storage');
+          }
+          addLog('Successfully retrieved device key from secure storage.');
+          
+          setStatus('deploying');
+          addLog(`Now deploying using address ${walletAddress} and its ETH balance to pay for deployment...`);
+          
+          // Deploy using the server action - this sends the deviceKey to the server action
+          // which will combine it with the server key to recreate the correct account
+          const result = await fetch('/api/wallet/deploy', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              userId,
+              walletAddress,
+              deviceKey
+            }),
+          });
+          
+          if (!result.ok) {
+            const errorData = await result.json();
+            throw new Error(errorData.error || 'Failed to deploy wallet');
+          }
+          
+          const deployResult = await result.json();
+          
+          // Add server logs to our log
+          deployResult.logs?.forEach((logMessage: string) => {
+            addLog(logMessage);
+          });
+          
+          // After deployment attempt, verify deployment status again
+          const verifyResult = await checkDeploymentStatus(walletAddress);
+          verifyResult.logs.forEach(logMsg => addLog(logMsg));
+          
+          if (verifyResult.isDeployed) {
+            setStatus('success');
+            addLog('✅ Deployment verified! Smart account is now deployed.');
+          } else if (deployResult.success) {
+            // The deployment action reported success but verification shows it's not deployed
             setStatus('error');
-            setErrorMessage(result.message);
-            addLog(`❌ ${result.message}`);
+            setErrorMessage('Deployment reported success but verification failed. Please try again.');
+            addLog('❌ Deployment verification failed - contract not found on chain.');
+          } else {
+            // Check if this is a funds issue
+            if (deployResult.message?.includes('funds') || deployResult.logs?.some((log: string) => log.includes('funds'))) {
+              setStatus('needsFunds');
+              addLog('❌ Your smart account needs ETH to deploy.');
+            } else {
+              setStatus('error');
+              setErrorMessage(deployResult.message || 'Unknown error occurred during deployment');
+              addLog(`❌ ${deployResult.message || 'Unknown error occurred'}`);
+            }
+          }
+        } catch (error) {
+          if ((error as Error).message.includes('device key')) {
+            addLog('❌ Device key not found in secure storage. This could be because:');
+            addLog('   - You are using a different device than the one used to create this wallet');
+            addLog('   - Your browser storage has been cleared');
+            setStatus('error');
+            setErrorMessage('Device key not found. Please recover your wallet using your recovery phrase.');
+          } else {
+            throw error;
           }
         }
       } catch (error) {
@@ -96,9 +136,9 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
           <h2 className="text-violet-500">Smart Account Deployment</h2>
           <button 
             onClick={onClose}
-            disabled={status === 'deploying' || status === 'checking'}
+            disabled={status === 'deploying' || status === 'checking' || status === 'retrievingKey'}
             className={`rounded-full p-1 hover:bg-gray-700 ${
-              (status === 'deploying' || status === 'checking') ? 'opacity-50 cursor-not-allowed' : ''
+              (status === 'deploying' || status === 'checking' || status === 'retrievingKey') ? 'opacity-50 cursor-not-allowed' : ''
             }`}
           >
             <svg className="w-6 h-6 text-gray-400" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -114,7 +154,7 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
               {status === 'idle' && (
                 <div className="w-8 h-8 bg-gray-700 rounded-full"></div>
               )}
-              {(status === 'deploying' || status === 'checking') && (
+              {(status === 'deploying' || status === 'checking' || status === 'retrievingKey') && (
                 <div className="w-8 h-8 border-4 border-violet-500 border-t-transparent rounded-full animate-spin"></div>
               )}
               {status === 'success' && (
@@ -136,6 +176,7 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
               <p className="text-white">
                 {status === 'idle' && 'Preparing deployment...'}
                 {status === 'checking' && 'Checking deployment status...'}
+                {status === 'retrievingKey' && 'Retrieving device key...'}
                 {status === 'deploying' && 'Deploying smart account...'}
                 {status === 'needsFunds' && 'Smart account needs ETH'}
                 {status === 'success' && 'Deployment successful!'}
@@ -219,7 +260,7 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
               </button>
             </div>
           )}
-          {(status === 'deploying' || status === 'checking' || status === 'idle') && (
+          {(status === 'deploying' || status === 'checking' || status === 'retrievingKey' || status === 'idle') && (
             <button 
               disabled
               className="px-4 py-2 bg-gray-700 text-white text-sm rounded-md opacity-50 cursor-not-allowed"
@@ -252,40 +293,83 @@ export default function DeployModal({ isOpen, onClose, walletAddress, userId }: 
       }
       
       // Start deployment flow
-      setStatus('deploying');
-      setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Smart account needs to be deployed.`]);
+      setStatus('retrievingKey');
+      setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Smart account needs to be deployed. Retrieving device key from secure storage...`]);
       
-      // Deploy using the server action
-      const result = await deploySmartAccount(userId, walletAddress);
-      
-      // Add server logs to our log
-      result.logs.forEach(logMessage => {
-        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${logMessage}`]);
-      });
-      
-      // After deployment attempt, verify deployment status again
-      const verifyResult = await checkDeploymentStatus(walletAddress);
-      verifyResult.logs.forEach(logMsg => {
-        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${logMsg}`]);
-      });
-      
-      if (verifyResult.isDeployed) {
-        setStatus('success');
-        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✅ Deployment verified! Smart account is now deployed.`]);
-      } else if (result.success) {
-        // The deployment action reported success but verification shows it's not deployed
-        setStatus('error');
-        setErrorMessage('Deployment reported success but verification failed. Please try again.');
-        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Deployment verification failed - contract not found on chain.`]);
-      } else {
-        // Check if this is a funds issue
-        if (result.message.includes('funds') || result.logs.some(log => log.includes('funds'))) {
-          setStatus('needsFunds');
-          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Your smart account needs ETH to deploy.`]);
-        } else {
+      try {
+        // Get device key from secure storage
+        const deviceKey = await getDeviceKey(userId);
+        if (!deviceKey) {
+          throw new Error('Device key not found in secure storage');
+        }
+        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Successfully retrieved device key from secure storage.`]);
+        
+        setStatus('deploying');
+        setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Now deploying using address ${walletAddress} and its ETH balance to pay for deployment...`]);
+        
+        // Deploy using the server action - this sends the deviceKey to the server action
+        // which will combine it with the server key to recreate the correct account
+        const result = await fetch('/api/wallet/deploy', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+          },
+          body: JSON.stringify({
+            userId,
+            walletAddress,
+            deviceKey
+          }),
+        });
+        
+        if (!result.ok) {
+          const errorData = await result.json();
+          throw new Error(errorData.error || 'Failed to deploy wallet');
+        }
+        
+        const deployResult = await result.json();
+        
+        // Add server logs to our log
+        deployResult.logs?.forEach((logMessage: string) => {
+          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${logMessage}`]);
+        });
+        
+        // After deployment attempt, verify deployment status again
+        const verifyResult = await checkDeploymentStatus(walletAddress);
+        verifyResult.logs.forEach(logMsg => {
+          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ${logMsg}`]);
+        });
+        
+        if (verifyResult.isDeployed) {
+          setStatus('success');
+          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ✅ Deployment verified! Smart account is now deployed.`]);
+        } else if (deployResult.success) {
+          // The deployment action reported success but verification shows it's not deployed
           setStatus('error');
-          setErrorMessage(result.message);
-          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ ${result.message}`]);
+          setErrorMessage('Deployment reported success but verification failed. Please try again.');
+          setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Deployment verification failed - contract not found on chain.`]);
+        } else {
+          // Check if this is a funds issue
+          if (deployResult.message?.includes('funds') || deployResult.logs?.some((log: string) => log.includes('funds'))) {
+            setStatus('needsFunds');
+            setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ Your smart account needs ETH to deploy.`]);
+          } else {
+            setStatus('error');
+            setErrorMessage(deployResult.message || 'Unknown error occurred during deployment');
+            setLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] ❌ ${deployResult.message || 'Unknown error occurred'}`]);
+          }
+        }
+      } catch (error) {
+        if ((error as Error).message.includes('device key')) {
+          setLog(prev => [
+            ...prev, 
+            `[${new Date().toLocaleTimeString()}] ❌ Device key not found in secure storage. This could be because:`,
+            `[${new Date().toLocaleTimeString()}]    - You are using a different device than the one used to create this wallet`,
+            `[${new Date().toLocaleTimeString()}]    - Your browser storage has been cleared`
+          ]);
+          setStatus('error');
+          setErrorMessage('Device key not found. Please recover your wallet using your recovery phrase.');
+        } else {
+          throw error;
         }
       }
     } catch (error) {
